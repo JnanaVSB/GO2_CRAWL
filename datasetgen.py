@@ -74,7 +74,7 @@ def settle_robot(target, steps=10000):
 mujoco.mj_forward(model, data)
 settle_robot(target_qpos)
 
-csv_file = "new_dataset_v1.csv"
+csv_file = "dataset/new_dataset_v1.csv"
 pose_count = 0
 
 print("=" * 60)

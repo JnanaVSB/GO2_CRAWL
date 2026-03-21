@@ -1,73 +1,3 @@
-# import numpy as np
-# import pandas as pd
-# import sys
-# sys.path.append("/home/jnana/ARLTask/Go2")
-# from sklearn.decomposition import PCA
-# from dmp.dmp_rhythmic import DMPs_rhythmic
-
-# csv_path = "/home/jnana/ARLTask/Go2/go2_crawl_poses_v7-A.csv"
-
-# df = pd.read_csv(csv_path)
-# labels = df.iloc[:, 0].values
-# X = df.iloc[:, 1:].values
-
-# print(f"Dataset: {X.shape[0]} poses, {X.shape[1]} joints")
-
-# pca = PCA(n_components=2)
-# X_pca = pca.fit_transform(X)
-# pca_mean = np.mean(X_pca, axis=0)
-# pca_std = np.std(X_pca, axis=0)
-
-# print(f"PCA explained variance: {pca.explained_variance_ratio_}")
-# print(f"PCA mean: {pca_mean}")
-# print(f"PCA std: {pca_std}")
-
-# n_bfs = 10
-# radius = 0.7
-
-# n_points = 240
-# theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
-# circle_pca = np.column_stack([
-#     pca_mean[0] + radius * np.cos(theta),
-#     pca_mean[1] + radius * np.sin(theta),
-# ])
-
-# print(f"\nCircle radius: {radius}")
-# print(f"Circle shape: {circle_pca.shape}")
-
-# dmp = DMPs_rhythmic(n_dmps=2, n_bfs=n_bfs, ay=np.ones(2) * 10.0)
-# dmp.imitate_path(y_des=circle_pca.T)
-
-# print(f"\nDMP trained!")
-# print(f"DMP weights shape: {dmp.w.shape}")
-# print(f"DMP goal: {dmp.goal}")
-# print(f"DMP c shape: {dmp.c.shape}")
-# print(f"DMP h shape: {dmp.h.shape}")
-
-# dmp_latent, _, _ = dmp.rollout()
-# dmp_joint = pca.inverse_transform(dmp_latent)
-
-# print(f"DMP rollout shape: {dmp_latent.shape}")
-# print(f"Joint trajectory shape: {dmp_joint.shape}")
-
-# np.save("initial_dmp_weights_v7_new.npy", dmp.w)
-
-# np.savez("dmp_params_v7.npz",
-#     weights=dmp.w,
-#     c=dmp.c,
-#     h=dmp.h,
-#     goal=dmp.goal,
-# )
-
-# import pickle
-# with open("pca_model.pkl", "wb") as f:
-#     pickle.dump(pca, f)
-
-# print(f"\nSaved:")
-# print(f"  initial_dmp_weights.npy")
-# print(f"  dmp_params.npz (weights, c, h, goal)")
-# print(f"  pca_model.pkl")
-
 import numpy as np
 import pandas as pd
 import mujoco
@@ -93,8 +23,8 @@ def quat_to_euler_wxyz(q):
 
 
 def main():
-    xml_path = "/home/jnana/ARLTask/Go2/go2/scene.xml"
-    csv_path = "/home/jnana/ARLTask/Go2/new_dataset_v1.csv"
+    xml_path = "/home/jnana/ARLTask/Go2_crawl/go2/scene.xml"
+    csv_path = "/home/jnana/ARLTask/Go2_crawl/dataset/new_dataset_v1.csv"
     radius = 0.4
     n_bfs = 10
     n_circle_points = 240
@@ -102,9 +32,8 @@ def main():
     kp = 40.0
     kd = 2.0
 
-    # ========================================
-    # 1. Load dataset and fit PCA
-    # ========================================
+#loading the dataset
+
     df = pd.read_csv(csv_path)
     labels = df.iloc[:, 0].astype(str).values
     X = df.iloc[:, 1:].values.astype(np.float64)
@@ -124,9 +53,8 @@ def main():
     print(f"PC1 range: {X_pca[:, 0].min():.3f} to {X_pca[:, 0].max():.3f}")
     print(f"PC2 range: {X_pca[:, 1].min():.3f} to {X_pca[:, 1].max():.3f}")
 
-    # ========================================
-    # 2. Build circle in PCA space
-    # ========================================
+# building circle
+
     theta = np.linspace(0, 2 * np.pi, n_circle_points, endpoint=False)
     circle_pca = np.column_stack([
         pca_mean[0] + radius * np.cos(theta),
@@ -136,9 +64,8 @@ def main():
     print(f"\nCircle radius: {radius}")
     print(f"Circle shape: {circle_pca.shape}")
 
-    # ========================================
-    # 3. Train DMP on circle
-    # ========================================
+#training
+
     dmp = DMPs_rhythmic(n_dmps=2, n_bfs=n_bfs, ay=np.ones(2) * 10.0)
     dmp.imitate_path(y_des=circle_pca.T)
 
@@ -151,9 +78,8 @@ def main():
     print(f"DMP rollout shape: {dmp_latent.shape}")
     print(f"Joint trajectory shape: {dmp_joint.shape}")
 
-    # ========================================
-    # 4. Save everything
-    # ========================================
+#save
+
     np.save("initial_dmp_weights_newV1_bfs10.npy", dmp.w)
 
     np.savez("dmp_params_newV1_bfs10.npz",
@@ -172,9 +98,8 @@ def main():
     print(f"  dmp_params.npz (weights, c, h, goal)")
     print(f"  pca_model.pkl")
 
-    # ========================================
-    # 5. Plot PCA space
-    # ========================================
+#plot
+
     plt.figure(figsize=(9, 9))
 
     plt.scatter(X_pca[:, 0], X_pca[:, 1], s=80, c="blue", zorder=5, label="Dataset poses")
@@ -198,9 +123,8 @@ def main():
     print("\nSaved pca_space_visualization.png")
     plt.show()
 
-    # ========================================
-    # 6. Simulate in MuJoCo
-    # ========================================
+#simulation
+
     print("\nSimulating DMP trajectory in MuJoCo...")
 
     model = mujoco.MjModel.from_xml_path(xml_path)

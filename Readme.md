@@ -4,12 +4,18 @@ Adapted from [humanoid-spider-walk](https://github.com/k-pratyush/humanoid-spide
 
 Best result: **44.9 cm forward** with 20 basis functions over 800 generations.
 
+## Demo
+
+| 10 bfs (23.0 cm) | 15 bfs (25.7 cm) | 20 bfs (44.9 cm) |
+|---|---|---|
+| ![10bfs](videos/go2_locomotion_bfs10.gif) | ![15bfs](videos/go2_locomotion_bfs15.gif) | ![20bfs](videos/go2_locomotion_bfs20.gif) |
+
 ## How to run
 ```bash
 pip install numpy pandas scikit-learn mujoco cma matplotlib imageio
 
 # 1. Build initial DMP weights
-python build_initial_dmp.py
+python test/build_initial_dmp.py
 
 # 2. Train
 python optimize/train_cmaes.py

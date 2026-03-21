@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-poses = pd.read_csv("/home/jnana/ARLTask/Go2/new_dataset_v1.csv")
+poses = pd.read_csv("/home/jnana/ARLTask/Go2_crawl/dataset/new_dataset_v1.csv")
 labels = poses["label"].values
 X = poses.iloc[:,1:].values
 

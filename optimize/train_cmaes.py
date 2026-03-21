@@ -10,7 +10,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from crawl_env import CrawlEvaluator
 
-SAVE_DIR = "cmaes_results_newV1_bfs10"
+SAVE_DIR = "/home/jnana/ARLTask/Go2_crawl/results/cmaes_results_newV1_bfs10"
 CHECKPOINT_DIR = os.path.join(SAVE_DIR, "checkpoints")
 BEST_WEIGHTS_PATH = os.path.join(SAVE_DIR, "best_weights_cmaes.npy")
 LOG_PATH = os.path.join(SAVE_DIR, "training_log.csv")
@@ -19,10 +19,10 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 os.makedirs(os.path.join(SAVE_DIR, "plots"), exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-XML_PATH = "/home/jnana/ARLTask/Go2/go2/scene.xml"
-CSV_PATH = "/home/jnana/ARLTask/Go2/new_dataset_v1.csv"
-DMP_PARAMS_PATH = "/home/jnana/ARLTask/Go2/dmp_params_newV1_bfs10.npz"
-INITIAL_WEIGHTS_PATH = "/home/jnana/ARLTask/Go2/initial_dmp_weights_newV1_bfs10.npy"
+XML_PATH = "/home/jnana/ARLTask/Go2_crawl/go2/scene.xml"
+CSV_PATH = "/home/jnana/ARLTask/Go2_crawl/dataset/new_dataset_v1.csv"
+DMP_PARAMS_PATH = "/home/jnana/ARLTask/Go2_crawl/weights and params/dmp_params_newV1_bfs20.npz"
+INITIAL_WEIGHTS_PATH = "/home/jnana/ARLTask/Go2_crawl/weights and params/initial_dmp_weights_newV1_bfs20.npy"
 N_BFS = 10
 SIM_STEPS = 1000
 DMP_TIMESTEPS = 628

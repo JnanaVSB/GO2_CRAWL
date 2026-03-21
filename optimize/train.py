@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import multiprocessing as mp
 
-sys.path.append("/home/jnana/ARLTask/Go2")
+sys.path.append("/home/jnana/ARLTask/G02_CRAWL")
 
 from openaies import OPENAIES
 from crawl_env import CrawlEvaluator
@@ -13,20 +13,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-# =========================
 # Config
-# =========================
-SAVE_DIR = "openaies_result_newV1_1"
+
+SAVE_DIR = "/home/jnana/ARLTask/Go2_crawl/results/openaies_result_newV1_1"
 PLOTS_DIR = os.path.join(SAVE_DIR, "plots")
 CHECKPOINT_DIR = os.path.join(SAVE_DIR, "checkpoints")
 CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "latest.npz")
 BEST_WEIGHTS_PATH = os.path.join(SAVE_DIR, "best_weights_newV1.npy")
 LOG_PATH = os.path.join(SAVE_DIR, "training_log.csv")
 
-XML_PATH = "/home/jnana/ARLTask/Go2/go2/scene.xml"
-CSV_PATH = "/home/jnana/ARLTask/Go2/new_dataset_v1.csv"
-DMP_PARAMS_PATH = "/home/jnana/ARLTask/Go2/dmp_params_newV1_bfs15.npz"
-INITIAL_WEIGHTS_PATH = "/home/jnana/ARLTask/Go2/initial_dmp_weights_newV1_bfs15.npy"
+XML_PATH = "/home/jnana/ARLTask/Go2_crawl/go2/scene.xml"
+CSV_PATH = "/home/jnana/ARLTask/Go2_crawl/dataset/new_dataset_v1.csv"
+DMP_PARAMS_PATH = "/home/jnana/ARLTask/Go2_crawl/weights and params/dmp_params_newV1_bfs20.npz"
+INITIAL_WEIGHTS_PATH = "/home/jnana/ARLTask/Go2_crawl/weights and params/initial_dmp_weights_newV1_bfs20.npy
 
 N_BFS = 10
 SIM_STEPS = 1000
@@ -47,10 +46,8 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 
-# =========================
 # Main-process env
-# only for logging/plots/final eval
-# =========================
+
 env = CrawlEvaluator(
     xml_path=XML_PATH,
     csv_path=CSV_PATH,
@@ -60,9 +57,9 @@ env = CrawlEvaluator(
     dmp_params_path=DMP_PARAMS_PATH,
 )
 
-# =========================
+
 # Worker env
-# =========================
+
 _worker_env = None
 
 
@@ -247,138 +244,3 @@ if __name__ == "__main__":
 
     main()
 
-# import numpy as np
-# import sys
-# import os
-# sys.path.append("/home/jnana/ARLTask/Go2")
-# from openaies import OPENAIES
-# from crawl_env import CrawlEvaluator
-# import matplotlib
-# matplotlib.use('Agg')
-# import matplotlib.pyplot as plt
-# import os
-
-# def save_pca_plot(env, weights, gen, reward, dist_x, save_dir="training_plots"):
-#     os.makedirs(save_dir, exist_ok=True)
-    
-#     latent_traj, joint_traj = env.build_trajectory_from_weights(weights)
-    
-#     plt.figure(figsize=(8, 8))
-#     plt.scatter(env.X_pca[:, 0], env.X_pca[:, 1], s=60, c="blue", label="Dataset poses")
-#     for i, lbl in enumerate(env.labels):
-#         plt.text(env.X_pca[i, 0] + 0.02, env.X_pca[i, 1] + 0.02, lbl, fontsize=7)
-    
-#     plt.plot(latent_traj[:, 0], latent_traj[:, 1], "r-", linewidth=2, label="Current best trajectory")
-#     plt.scatter(latent_traj[0, 0], latent_traj[0, 1], s=100, c="orange", label="Start", zorder=6)
-    
-#     plt.xlabel(f"PC1 ({100 * env.pca.explained_variance_ratio_[0]:.1f}%)")
-#     plt.ylabel(f"PC2 ({100 * env.pca.explained_variance_ratio_[1]:.1f}%)")
-#     plt.title(f"Gen {gen} | Reward {reward:.1f} | dist_x {dist_x:.4f}")
-#     plt.grid(True, alpha=0.3)
-#     plt.axis("equal")
-#     plt.legend()
-#     plt.tight_layout()
-#     plt.savefig(os.path.join(SAVE_DIR, "plots", f"gen_{gen:04d}.png"), dpi=100)
-#     plt.close()
-
-# CHECKPOINT_PATH = "optimizer_checkpoint_new_v12.npz"
-# BEST_WEIGHTS_PATH = "best_weights_new_v12.npy"
-
-# env = CrawlEvaluator(
-#     xml_path="/home/jnana/ARLTask/Go2/go2/scene.xml",
-#     csv_path="/home/jnana/ARLTask/Go2/go2_crawl_poses_v12.csv",
-#     n_bfs=10,
-#     sim_steps=1000,
-#     dmp_timesteps=628,
-# )
-
-# log_file = open(os.path.join(SAVE_DIR, "training_log.csv"), "w")
-# log_file.write("gen,best_reward,avg_reward,overall_best,dist_x,height,steps,terminated\n")
-
-# n_params = env.num_params
-# n_generations = 800
-
-# es = OPENAIES(
-#     n_params=n_params,
-#     learning_rate=0.01,
-#     noise_std=0.2,
-#     population_size=20,
-# )
-
-# start_gen = 0
-# best_reward = -np.inf
-# best_weights = None
-
-# if os.path.exists(CHECKPOINT_PATH):
-#     ckpt = np.load(CHECKPOINT_PATH)
-#     es.weights = ckpt["es_weights"]
-#     es.m = ckpt["es_m"]
-#     es.v = ckpt["es_v"]
-#     es.t = int(ckpt["es_t"])
-#     start_gen = int(ckpt["generation"]) + 1
-#     best_reward = float(ckpt["best_reward"])
-#     best_weights = ckpt["best_weights"]
-#     print(f"Resumed from checkpoint at generation {start_gen}")
-# else:
-#     initial_weights = np.load("/home/jnana/ARLTask/Go2/initial_dmp_weights_v12_new.npy").flatten()
-#     es.set_weights(initial_weights)
-#     best_weights = initial_weights.copy()
-#     print("Starting from initial weights")
-
-# print(f"Starting optimization: {n_params} parameters, {n_generations} generations")
-
-# for gen in range(start_gen, n_generations):
-#     candidates = es.ask()
-
-#     rewards = []
-#     for candidate in candidates:
-#         reward, info = env.evaluate_weights(np.array(candidate), verbose=False)
-#         rewards.append(reward)
-
-#     es.tell(rewards)
-
-#     gen_best_idx = np.argmax(rewards)
-#     gen_best_reward = rewards[gen_best_idx]
-
-#     if gen_best_reward > best_reward:
-#         best_reward = gen_best_reward
-#         best_weights = np.array(candidates[gen_best_idx]).copy()
-#         np.save(BEST_WEIGHTS_PATH, best_weights)
-
-#     if gen % 10 == 0:
-#         _, best_info = env.evaluate_weights(best_weights, verbose=False)
-
-
-#         total_steps = best_info.get('sim_steps_completed', 0)
-#         print(
-#             f"Gen {gen}: best={gen_best_reward:.4f}, "
-#             f"avg={np.mean(rewards):.4f}, "
-#             f"overall_best={best_reward:.4f}, "
-#             f"dist_x={best_info['distance_x']:.4f}, "
-#             f"height={best_info['final_height']:.4f}, "
-#             f"steps={total_steps}, "
-#             f"term={best_info['terminated']}"
-#         )
-
-#         log_file.write(f"{gen},{gen_best_reward:.6f},{gen_avg_reward:.6f},{best_reward:.6f},{best_info['distance_x']:.6f},{best_info['final_height']:.6f},{best_info['sim_steps_completed']},{best_info['terminated']}\n")
-#         log_file.flush()
-
-#     if gen % 100 == 0:
-#         save_pca_plot(env, best_weights, gen, best_reward, best_info['distance_x'])
-#         print(f"  Saved PCA plot for gen {gen}")
-
-#     np.savez(
-#         CHECKPOINT_PATH,
-#         generation=gen,
-#         es_weights=es.weights,
-#         es_m=es.m,
-#         es_v=es.v,
-#         es_t=es.t,
-#         best_reward=best_reward,
-#         best_weights=best_weights,
-#     )
-
-# print(f"\nOptimization complete!")
-# print(f"Best reward: {best_reward:.4f}")
-# print("\nFinal evaluation:")
-# env.evaluate_weights(best_weights, verbose=True)
