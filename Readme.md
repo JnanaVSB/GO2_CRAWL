@@ -15,7 +15,7 @@ Best result: **44.9 cm forward** with 20 basis functions over 800 generations.
 pip install numpy pandas scikit-learn mujoco cma matplotlib imageio
 
 # 1. Build initial DMP weights
-python test/build_initial_dmp.py
+python pca_dmp_init.py
 
 # 2. Train
 python optimize/train_cmaes.py

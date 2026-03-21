@@ -5,7 +5,7 @@ import numpy as np
 import csv
 import os
 
-xml_path = "go2/scene.xml"
+xml_path = "/home/jnana/ARLTask/Go2_crawl/go2/scene.xml"
 model = mujoco.MjModel.from_xml_path(xml_path)
 data = mujoco.MjData(model)
 
