@@ -48,6 +48,8 @@ def _evaluate_single(args):
     steps : int
     terminated : bool
     distance_x : float
+    avg_height_dev : float
+        Mean absolute deviation of base height from target crawl height.
     """
     (candidate, env_cls, env_kwargs, policy_cls, policy_kwargs,
      sim_steps, reward_fn_name, termination_fn_name, reward_cfg) = args
@@ -65,12 +67,20 @@ def _evaluate_single(args):
     total_reward = 0.0
     terminated = False
 
+    # Track height for cost computation
+    target_height = reward_cfg.get("target_height", 0.17)
+    height_devs = []
+
     for t in range(sim_steps):
         target = joint_traj[t % traj_len]
         obs, _, _, _, _ = env.step(target)
 
         reward = reward_fn(prev_obs, obs, reward_cfg)
         total_reward += reward
+
+        # Track height deviation
+        z = obs[26]
+        height_devs.append(abs(z - target_height))
 
         terminated = termination_fn(obs, reward_cfg)
         if terminated:
@@ -80,8 +90,9 @@ def _evaluate_single(args):
         prev_obs = obs
 
     distance_x = obs[24] - start_x
+    avg_height_dev = float(np.mean(height_devs)) if height_devs else 0.0
 
-    return total_reward, t + 1, terminated, distance_x
+    return total_reward, t + 1, terminated, distance_x, avg_height_dev
 
 
 def _get_pca_range(policy_cls, policy_kwargs, weights):
@@ -286,15 +297,16 @@ def run_training_loop(
             w_start = time.time()
 
             weights = agent.generate_random_weights()
-            total_reward, steps, terminated, distance_x = _evaluate_single(
+            total_reward, steps, terminated, distance_x, avg_height_dev = _evaluate_single(
                 _build_eval_args(weights),
             )
 
-            # Build metadata for detailed mode
+            # Build metadata
             metadata = {
                 "distance_x": distance_x,
                 "terminated": terminated,
                 "steps": steps,
+                "avg_height_dev": avg_height_dev,
             }
             if detailed:
                 pca_x_range, pca_y_range = _get_pca_range(
@@ -303,10 +315,10 @@ def run_training_loop(
                 metadata["pca_x_range"] = pca_x_range
                 metadata["pca_y_range"] = pca_y_range
 
-            agent.store_result(weights, total_reward, metadata)
+            agent.store_result(weights, total_reward, distance_x, avg_height_dev, metadata)
             agent.update_best(weights, total_reward)
 
-            cost = -total_reward
+            cost = agent.buffer.entries[-1]["cost"]
             reward_history.append(total_reward)
             dist_history.append(distance_x)
             cost_history.append(cost)
@@ -365,12 +377,10 @@ def run_training_loop(
                         print("  All parse retries failed. Using random weights.")
                         weights = agent.generate_random_weights()
                         reasoning = "PARSE_FAILED: fell back to random weights"
-
-            # Runner owns the iteration counter — one increment per logical iteration
-            agent.iterations_done += 1
+                        agent.iterations_done += 1
 
             # 2. Evaluate via MuJoCo rollout
-            total_reward, steps, terminated, distance_x = _evaluate_single(
+            total_reward, steps, terminated, distance_x, avg_height_dev = _evaluate_single(
                 _build_eval_args(weights),
             )
 
@@ -379,6 +389,7 @@ def run_training_loop(
                 "distance_x": distance_x,
                 "terminated": terminated,
                 "steps": steps,
+                "avg_height_dev": avg_height_dev,
             }
             if detailed:
                 pca_x_range, pca_y_range = _get_pca_range(
@@ -388,12 +399,12 @@ def run_training_loop(
                 metadata["pca_y_range"] = pca_y_range
 
             # 4. Store result in agent's history buffer
-            agent.store_result(weights, total_reward, metadata)
+            agent.store_result(weights, total_reward, distance_x, avg_height_dev, metadata)
 
             # 5. Track best
             agent.update_best(weights, total_reward)
 
-            cost = -total_reward
+            cost = agent.buffer.entries[-1]["cost"]
             reward_history.append(total_reward)
             dist_history.append(distance_x)
             cost_history.append(cost)

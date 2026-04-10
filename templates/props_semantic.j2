@@ -7,10 +7,17 @@ You are a good global RL policy optimizer, helping me find the global optimal po
     The policy is parameterized by a set of weights that define a 2D trajectory in PCA latent space via Dynamic Movement Primitives (DMPs).
     There are {{ N_BFS }} basis functions per dimension ({{ n_components }} dimensions), resulting in a total of {{ num_weights }} weights.
     Weight values should be floats, and can be both positive and negative.
-    The function f(w) evaluates the {{ "cost" if objective == "cost" else "reward" }} of the policy.
+
+# Cost function:
 {% if objective == "cost" %}
-    Lower f(w) is better.
+    f(w) = -distance_x + {{ height_weight }} * avg_height_deviation
+    Where:
+        distance_x:          how far the robot moved forward in the +x direction (meters). More is better.
+        avg_height_deviation: mean absolute deviation of the robot's base height from the target crawl height of {{ target_height }}m. Less is better.
+    Lower f(w) is better. A negative cost means the robot moved forward more than it deviated in height.
+    To minimize f(w), the robot should move as far forward as possible while maintaining a stable height close to {{ target_height }}m.
 {% else %}
+    The function f(w) evaluates the reward of the policy.
     Higher f(w) is better.
 {% endif %}
 

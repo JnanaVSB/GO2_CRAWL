@@ -5,10 +5,16 @@ I will give you the function evaluation f(w) and the current iteration number at
     The policy is parameterized by a set of weights that define a 2D trajectory in PCA latent space via Dynamic Movement Primitives (DMPs).
     There are {{ N_BFS }} basis functions per dimension ({{ n_components }} dimensions), resulting in a total of {{ num_weights }} weights.
     Weight values should be floats, and can be both positive and negative.
-    The function f(w) evaluates the {{ "cost" if objective == "cost" else "reward" }} of the policy.
+
+# Cost function:
 {% if objective == "cost" %}
-    Lower f(w) is better.
+    f(w) = -distance_x + {{ height_weight }} * avg_height_deviation
+    Where:
+        distance_x:          how far forward the policy moves (meters). More is better.
+        avg_height_deviation: mean absolute deviation from a target height of {{ target_height }}m. Less is better.
+    Lower f(w) is better. A negative cost means forward progress exceeds height instability.
 {% else %}
+    The function f(w) evaluates the reward of the policy.
     Higher f(w) is better.
 {% endif %}
 

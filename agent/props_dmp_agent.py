@@ -49,7 +49,7 @@ import time
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
 
-from agent.propsbuffernobias import WeightHistoryBuffer
+from agent.props_replay_buffer import WeightHistoryBuffer
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +309,6 @@ class ProPSDMPAgent:
         num_weights,
         initial_weights,
         total_iterations,
-        n_bfs,
-        n_components,
         action_range=2.0,
         llm_model_name="gpt-4o",
         llm_provider=None,
@@ -324,6 +322,8 @@ class ProPSDMPAgent:
         warmup_episodes=10,
         optimum=None,
         step_size=0.1,
+        height_weight=1.0,
+        target_height=0.17,
         max_retries=5,
         retry_delay=60,
     ):
@@ -337,10 +337,6 @@ class ProPSDMPAgent:
             Search bounds are centered on these values.
         total_iterations : int
             Total LLM optimization iterations (not counting warmup).
-        n_bfs : int
-            Number of DMP basis functions per dimension.
-        n_components : int
-            Number of PCA dimensions (DMP dimensions).
         action_range : float
             Search range: initial_weights ± this value.
         llm_model_name : str
@@ -372,8 +368,8 @@ class ProPSDMPAgent:
             "basic" — weights + f(w) only.
             "detailed" — weights + f(w) + dist_x + terminated + PCA range.
         objective : str
-            "cost" — LLM minimizes f(w) = -reward.
-            "reward" — LLM maximizes f(w) = reward.
+            "cost" — LLM minimizes f(w).
+            "reward" — LLM maximizes f(w).
         buffer_size : int
             Max entries in the history buffer. Oldest dropped when full.
         warmup_episodes : int
@@ -383,14 +379,15 @@ class ProPSDMPAgent:
             If None, not included in the prompt.
         step_size : float
             Suggested exploration step size for the LLM.
+        height_weight : float
+            Weight for height deviation penalty in cost function.
+            cost = -distance_x + height_weight * avg_height_dev
         max_retries : int
             Max retries per LLM API call on failure.
         retry_delay : int
             Base seconds between retries (multiplied by attempt number).
         """
         self.num_weights = num_weights
-        self.n_bfs = n_bfs
-        self.n_components = n_components
         self.initial_weights = np.asarray(
             initial_weights, dtype=np.float64,
         ).flatten()
@@ -401,6 +398,8 @@ class ProPSDMPAgent:
         self.warmup_episodes = warmup_episodes
         self.optimum = optimum
         self.step_size = step_size
+        self.height_weight = height_weight
+        self.target_height = target_height
 
         # Weight bounds
         self.w_low = self.initial_weights - action_range
@@ -494,8 +493,8 @@ class ProPSDMPAgent:
         # Build template variables
         template_vars = {
             "num_weights": self.num_weights,
-            "N_BFS": self.n_bfs,
-            "n_components": self.n_components,
+            "N_BFS": self.num_weights // 2,
+            "n_components": 2,
             "MAX_ITERS": self.total_iterations,
             "iter_idx": self.iterations_done,
             "feedback_text": feedback_text,
@@ -504,6 +503,8 @@ class ProPSDMPAgent:
             "w_low": self.w_low,
             "w_high": self.w_high,
             "initial_weights": self.initial_weights,
+            "height_weight": self.height_weight,
+            "target_height": self.target_height,
         }
 
         # Optional fields
@@ -526,27 +527,37 @@ class ProPSDMPAgent:
         # Clip to bounds
         weights = np.clip(weights, self.w_low, self.w_high)
 
+        self.iterations_done += 1
+
         return weights, reasoning, prompt, raw_response, api_time
 
     # ------------------------------------------------------------------
     # Result storage
     # ------------------------------------------------------------------
 
-    def store_result(self, weights, reward, metadata=None):
+    def store_result(self, weights, reward, distance_x, avg_height_dev, metadata=None):
         """
         Store a rollout result in the history buffer.
+
+        Cost is computed as a meaningful quantity for the LLM:
+            cost = -distance_x + height_weight * avg_height_dev
+
+        Lower cost = farther forward + more stable height.
 
         Parameters
         ----------
         weights : np.ndarray
             The DMP weight vector that was evaluated.
         reward : float
-            Total reward from the rollout.
+            Total reward from the rollout (tracked separately).
+        distance_x : float
+            Forward distance traveled.
+        avg_height_dev : float
+            Mean absolute deviation from target crawl height.
         metadata : dict or None
-            Extra info: distance_x, terminated, steps,
-            pca_x_range, pca_y_range.
+            Extra info: distance_x, terminated, steps, etc.
         """
-        cost = -reward
+        cost = -distance_x + self.height_weight * avg_height_dev
         self.buffer.add(weights, cost, reward, metadata)
 
     # ------------------------------------------------------------------

@@ -41,8 +41,8 @@ agent:
   ollama_base_url: http://sg017:11434
 
   template_dir: templates
-  template_name: props_semantic.j2
-  env_description_file: go2_crawl_description.j2
+  template_name: props_numeric.j2
+  env_description_file: null
 
   # Optimization settings
   feedback_mode: basic
@@ -61,7 +61,7 @@ agent:
 training:
   total_iterations: 400
   sim_steps: 1000
-  logdir: results/propsp_ollama_bfs10
+  logdir: results/props_ollama_bfs10
   n_workers: 1
   checkpoint_every: 10
   log_every: 1

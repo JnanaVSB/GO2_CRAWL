@@ -289,6 +289,8 @@ def run_props(config):
         warmup_episodes=agent_cfg.get("warmup_episodes", 10),
         optimum=agent_cfg.get("optimum", None),
         step_size=agent_cfg.get("step_size", 0.1),
+        height_weight=agent_cfg.get("height_weight", 1.0),
+        target_height=reward_cfg.get("target_height", 0.17),
         max_retries=agent_cfg.get("max_retries", 5),
         retry_delay=agent_cfg.get("retry_delay", 60),
     )

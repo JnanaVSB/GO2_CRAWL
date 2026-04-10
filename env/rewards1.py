@@ -19,12 +19,6 @@ import numpy as np
 def forward_reward(prev_obs, obs, config):
     """
     Reward forward (+x) motion, penalize lateral drift and joint velocity.
-    Normalized by sim_steps to keep magnitudes consistent.
-
-    Matches the original working Go2 crawl model:
-        reward += 1000.0 * dx / sim_steps
-        reward -= 500.0 * abs(dy) / sim_steps
-        reward -= 0.0002 * mean(|joint_vel|)
     """
     prev_x = prev_obs[24]
     prev_y = prev_obs[25]
@@ -35,11 +29,9 @@ def forward_reward(prev_obs, obs, config):
     dx = x - prev_x
     dy = y - prev_y
 
-    sim_steps = config.get("sim_steps", 1000)
-
     reward = (
-        config["reward_forward_weight"] * dx / sim_steps
-        + config["reward_lateral_weight"] * abs(dy) / sim_steps
+        config["reward_forward_weight"] * dx
+        + config["reward_lateral_weight"] * abs(dy)
         + config["reward_joint_vel_weight"] * np.mean(np.abs(joint_vel))
     )
 
@@ -55,6 +47,9 @@ def crawl_termination(obs, config):
     if z < config["min_height"] or z > config["max_height"]:
         return True
 
+    # Quaternion from obs[27:31] in (w, x, y, z) convention.
+    # This matches MuJoCo's qpos layout for free joints (qpos[3:7] = w,x,y,z).
+    # If the simulator or obs packing order changes, this MUST be updated.
     w, x, y, zz = obs[27:31]
     roll = np.arctan2(2.0 * (w * x + y * zz), 1.0 - 2.0 * (x * x + y * y))
     sinp = 2.0 * (w * y - zz * x)
