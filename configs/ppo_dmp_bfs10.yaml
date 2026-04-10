@@ -1,0 +1,55 @@
+runner: rl
+
+env:
+  xml_path: /Volumes/DEV/IRL/Go2_crawl/go2/scene.xml
+  control_substeps: 4
+  kp: 80.0
+  kd: 4.0
+  initial_base_height: 0.30
+  initial_angles: [0.0303, 1.54, -2.3, 0.0303, 1.54, -2.3, 0.0365, 1.48, -2.39, 0.0365, 1.48, -2.39]
+  settle_steps: 1000
+
+reward:
+  reward_fn: forward
+  termination_fn: crawl
+  reward_forward_weight: 1000.0
+  reward_lateral_weight: -500.0
+  reward_joint_vel_weight: -0.0002
+  min_height: 0.14
+  max_height: 0.20
+  max_abs_roll_deg: 50.0
+  max_abs_pitch_deg: 50.0
+  fall_penalty: 25.0
+
+policy:
+  csv_path: /Volumes/DEV/IRL/Go2_crawl/dataset/new_dataset_v1.csv
+  dmp_params_path: data/weights/dmp_params_newV1_bfs10.npz
+  n_components: 2
+  n_bfs: 10
+  dmp_timesteps: 628
+
+agent:
+  type: ppo_dmp
+  initial_weights_path: data/weights/initial_dmp_weights_newV1_bfs10.npy
+  action_range: 50.0                   # search range: initial_weights ± this value
+  learning_rate: 3.0e-4
+  n_steps: 64                         # episodes per PPO update (like CMA-ES popsize)
+  batch_size: 64                      # minibatch size for gradient updates (must be <= n_steps)
+  n_epochs: 10                        # passes over the batch per update
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.5
+  ent_coef: 0.01                      # small entropy bonus for exploration
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  net_arch: [256, 256]
+  seed: null
+  device: auto
+
+training:
+  total_episodes: 5000
+  sim_steps: 1000
+  logdir: results/ppo_dmp_bfs10
+  n_workers: 1
+  checkpoint_every: 50
+  log_every: 10

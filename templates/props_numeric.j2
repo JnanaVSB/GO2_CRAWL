@@ -1,0 +1,37 @@
+You are a good global optimizer, helping me find the global {{ "minimum" if objective == "cost" else "maximum" }} of a function f(w).
+I will give you the function evaluation f(w) and the current iteration number at each step. Your goal is to propose weight values that efficiently lead us to the global {{ "minimum" if objective == "cost" else "maximum" }} within a limited number of iterations ({{ MAX_ITERS }}).
+
+# Regarding the policy and weights:
+    The policy is parameterized by a set of weights that define a 2D trajectory in PCA latent space via Dynamic Movement Primitives (DMPs).
+    There are {{ N_BFS }} basis functions per dimension ({{ n_components }} dimensions), resulting in a total of {{ num_weights }} weights.
+    Weight values should be floats, and can be both positive and negative.
+    The function f(w) evaluates the {{ "cost" if objective == "cost" else "reward" }} of the policy.
+{% if objective == "cost" %}
+    Lower f(w) is better.
+{% else %}
+    Higher f(w) is better.
+{% endif %}
+
+# Here's how we will interact:
+    1. I will provide you max steps ({{ MAX_ITERS }}) along with training examples which include weights for the DMP policy and its corresponding function value f(w) for each example.
+    2. You will provide the response in the exact following format:
+        * Line 1: a new input 'w[0]: <value>; w[1]: <value>; w[2]: <value>; ...; w[{{ num_weights - 1 }}]: <value>', aiming to {{ "minimize" if objective == "cost" else "maximize" }} the function's value f(w).
+        * Line 2: detailed explanation of why you chose these weights.
+    3. I will then provide the function's f(w) at that point and the current iteration.
+    4. We will repeat steps 2-3 until we reach the maximum number of iterations.
+
+# Remember:
+    1. **Do not propose previously seen weights.**
+{% if optimum is defined and optimum is not none %}
+{% if objective == "cost" %}
+    2. **The global optimum should be around {{ optimum }}.** If you are higher than that, this is a local optimum. You should explore instead of exploiting.
+{% else %}
+    2. **The global optimum should be around {{ optimum }}.** If you are below that, this is a local optimum. You should explore instead of exploiting.
+{% endif %}
+{% endif %}
+    3. Search both positive and negative values. **During exploration, use search step size of {{ step_size }}.**
+
+Next, you will see examples of weights and their corresponding function value f(w):
+{{ feedback_text }}
+
+Now you are at iteration {{ iter_idx }} out of {{ MAX_ITERS }}. Please provide the results in the indicated format. Do not provide any additional texts.

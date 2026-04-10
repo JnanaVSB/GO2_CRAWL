@@ -1,0 +1,61 @@
+runner: props
+
+env:
+  xml_path: /Volumes/DEV/IRL/Go2_crawl/go2/scene.xml
+  control_substeps: 4
+  kp: 80.0
+  kd: 4.0
+  initial_base_height: 0.30
+  initial_angles: [0.0303, 1.54, -2.3, 0.0303, 1.54, -2.3, 0.0365, 1.48, -2.39, 0.0365, 1.48, -2.39]
+  settle_steps: 1000
+
+reward:
+  reward_fn: forward
+  termination_fn: crawl
+  reward_forward_weight: 1000.0
+  reward_lateral_weight: -500.0
+  reward_joint_vel_weight: -0.0002
+  min_height: 0.14
+  max_height: 0.20
+  max_abs_roll_deg: 50.0
+  max_abs_pitch_deg: 50.0
+  fall_penalty: 25.0
+
+policy:
+  csv_path: /Volumes/DEV/IRL/Go2_crawl/dataset/new_dataset_v1.csv
+  dmp_params_path: data/weights/dmp_params_newV1_bfs10.npz
+  n_components: 2
+  n_bfs: 10
+  dmp_timesteps: 628
+
+agent:
+  type: props_dmp
+  initial_weights_path: data/weights/initial_dmp_weights_newV1_bfs10.npy
+  action_range: 2.0                     # search range: initial_weights ± this value
+
+  # LLM settings
+  llm_model_name: gpt-oss:120b                # gpt-4o, gemini-2.5-pro-preview-05-06, claude-3-7-sonnet-20250219, etc.
+  template_dir: templates
+  template_name: props_semantic.j2    # ProPS+ (with environment description)
+  env_description_file: go2_crawl_description.j2
+
+  # Optimization settings
+  feedback_mode: basic                  # "basic" = weights + f(w) only, "detailed" = + dist_x, terminated, PCA range
+  objective: cost                       # "cost" = minimize -reward, "reward" = maximize reward
+  buffer_size: 200                      # max history entries in LLM prompt
+  warmup_episodes: 10                   # random rollouts before first LLM call
+  optimum: null                         # expected optimal value (null = omit from prompt)
+  step_size: 0.1                        # suggested exploration step size for LLM
+
+  # API settings
+  max_retries: 5                        # retries per LLM call on failure
+  retry_delay: 60                       # base seconds between retries
+  max_parse_retries: 3                  # re-query LLM if response parsing fails
+
+training:
+  total_iterations: 400                 # LLM optimization iterations (not counting warmup)
+  sim_steps: 1000
+  logdir: results/props_dmp_semantic_bfs10
+  n_workers: 1
+  checkpoint_every: 50
+  log_every: 1                          # log every iteration (LLM calls are slow, so this is fine)

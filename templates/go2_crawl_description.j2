@@ -1,0 +1,9 @@
+The environment (in MuJoCo) simulates a Unitree Go2 quadruped robot performing a crawling gait. The robot must stay low to the ground and move forward in the +x direction.
+
+The policy acts as a high-level trajectory generator. The DMP weights define a cyclic 2D trajectory in PCA latent space, which is then mapped to 12-joint angle trajectories via PCA inverse transform. This joint trajectory is replayed cyclically on the robot for 1000 simulation steps using PD position control.
+
+The PCA latent space was fitted on a dataset of manually designed crawling poses. The initial DMP weights produce a circular trajectory in this space, which corresponds to a basic crawling gait. The optimizer's job is to find better weights that produce a more effective crawl.
+
+The reward measures forward progress in the +x direction, penalized by lateral drift (y movement) and excessive joint velocities. The episode terminates early if the robot's base height goes outside [0.14, 0.20] meters, or if roll/pitch angles exceed 50 degrees, indicating a fall or flip.
+
+Higher reward means the robot crawled farther forward while staying stable and low.
