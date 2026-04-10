@@ -49,7 +49,7 @@ import time
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
 
-from agent.props_replay_buffer import WeightHistoryBuffer
+from agent.propsbuffernobias import WeightHistoryBuffer
 
 
 # ---------------------------------------------------------------------------
