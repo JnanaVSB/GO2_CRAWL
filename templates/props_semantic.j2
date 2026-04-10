@@ -10,11 +10,11 @@ You are a good global RL policy optimizer, helping me find the global optimal po
 
 # Cost function:
 {% if objective == "cost" %}
-    f(w) = -distance_x + {{ height_weight }} * avg_height_deviation
+    f(w) = -1000 * distance_x + {{ height_weight }} * avg_height_deviation
     Where:
         distance_x:          how far the robot moved forward in the +x direction (meters). More is better.
         avg_height_deviation: mean absolute deviation of the robot's base height from the target crawl height of {{ target_height }}m. Less is better.
-    Lower f(w) is better. A negative cost means the robot moved forward more than it deviated in height.
+    Lower f(w) is better. A negative cost means the robot moved forward significantly while maintaining stable height.
     To minimize f(w), the robot should move as far forward as possible while maintaining a stable height close to {{ target_height }}m.
 {% else %}
     The function f(w) evaluates the reward of the policy.

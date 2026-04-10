@@ -49,7 +49,7 @@ import time
 import numpy as np
 from jinja2 import Environment, FileSystemLoader
 
-from agent.propsbuffernobias import WeightHistoryBuffer
+from agent.props_replay_buffer import WeightHistoryBuffer
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ class ProPSDMPAgent:
             Suggested exploration step size for the LLM.
         height_weight : float
             Weight for height deviation penalty in cost function.
-            cost = -distance_x + height_weight * avg_height_dev
+            cost = -1000 * distance_x + height_weight * avg_height_dev
         max_retries : int
             Max retries per LLM API call on failure.
         retry_delay : int
@@ -540,9 +540,11 @@ class ProPSDMPAgent:
         Store a rollout result in the history buffer.
 
         Cost is computed as a meaningful quantity for the LLM:
-            cost = -distance_x + height_weight * avg_height_dev
+            cost = -1000 * distance_x + height_weight * avg_height_dev
 
         Lower cost = farther forward + more stable height.
+        The 1000x scale on distance keeps cost values in a range
+        the LLM can reason about (single digits to tens).
 
         Parameters
         ----------
@@ -557,7 +559,7 @@ class ProPSDMPAgent:
         metadata : dict or None
             Extra info: distance_x, terminated, steps, etc.
         """
-        cost = -distance_x + self.height_weight * avg_height_dev
+        cost = -1000.0 * distance_x + self.height_weight * avg_height_dev
         self.buffer.add(weights, cost, reward, metadata)
 
     # ------------------------------------------------------------------
