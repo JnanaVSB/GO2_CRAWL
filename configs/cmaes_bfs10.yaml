@@ -39,5 +39,5 @@ training:
   sim_steps: 1000
   logdir: results/cmaes_bfs10
   n_workers: 8
-  checkpoint_every: 100
+  checkpoint_every: 50
   log_every: 10
