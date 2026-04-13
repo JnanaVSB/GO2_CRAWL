@@ -1,8 +1,11 @@
 """
 Go2 Crawl — Main Entry Point.
 
-Reads a config YAML, sets up the agent + policy + env, and dispatches
-to the appropriate runner (CMA-ES, SAC, PPO, ProPS/ProPS+).
+Reads a config YAML, sets up the agent + trajectory generator + env,
+and dispatches to the appropriate runner (CMA-ES, SAC, PPO, ProPS/ProPS+).
+
+The trajectory generator (PCA+DMP, direct DMP, etc.) is selected via
+the config field: trajectory.type
 
 Usage:
     python main.py --config configs/cmaes_bfs10.yaml
@@ -13,19 +16,51 @@ import yaml
 import argparse
 import os
 import numpy as np
-import pandas as pd
 import shutil
-from sklearn.decomposition import PCA
 
-from dmp.dmp_rhythmic import DMPs_rhythmic
 from env.go2_env import Go2CrawlEnv
-from trajectory.dmp_policy import DMPPolicy
+from trajectory.pca_dmp import PCADMPTrajectory
+from trajectory.direct_dmp import DirectDMPTrajectory
 from agent.cmaes_agent import CMAESAgent
 from runner import evolutionary_runner
 from runner import sac_dmp_runner
 from runner import ppo_dmp_runner
 from runner import props_dmp_runner
 
+
+# -----------------------------------------------------------------------
+# Trajectory generator registry
+# -----------------------------------------------------------------------
+
+TRAJECTORY_REGISTRY = {
+    "pca_dmp": PCADMPTrajectory,
+    "direct_dmp": DirectDMPTrajectory,
+}
+
+
+def get_trajectory_cls(config):
+    """
+    Look up the trajectory generator class from config.
+
+    Reads config["trajectory"]["type"]. Falls back to "pca_dmp"
+    if the trajectory section is missing (backward compatibility
+    with old configs that don't have a trajectory.type field).
+    """
+    traj_cfg = config.get("trajectory", {})
+    traj_type = traj_cfg.get("type", "pca_dmp")
+
+    if traj_type not in TRAJECTORY_REGISTRY:
+        available = ", ".join(TRAJECTORY_REGISTRY.keys())
+        raise ValueError(
+            f"Unknown trajectory type: '{traj_type}'. Available: {available}"
+        )
+
+    return TRAJECTORY_REGISTRY[traj_type]
+
+
+# -----------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
@@ -47,98 +82,39 @@ def main():
 
     if args.fresh:
         logdir = config["training"]["logdir"]
-        # Clear checkpoints
-        ckpt_dir = os.path.join(logdir, "checkpoints")
-        if os.path.exists(ckpt_dir):
-            shutil.rmtree(ckpt_dir)
-        # Clear plots
-        plots_dir = os.path.join(logdir, "plots")
-        if os.path.exists(plots_dir):
-            shutil.rmtree(plots_dir)
-        # Clear reasoning logs (ProPS)
-        reasoning_dir = os.path.join(logdir, "reasoning")
-        if os.path.exists(reasoning_dir):
-            shutil.rmtree(reasoning_dir)
-        # Clear best weights
+        for subdir in ["checkpoints", "plots", "reasoning"]:
+            path = os.path.join(logdir, subdir)
+            if os.path.exists(path):
+                shutil.rmtree(path)
         best_w = os.path.join(logdir, "best_weights.npy")
         if os.path.exists(best_w):
             os.remove(best_w)
         print(f"Cleared checkpoints, plots, and reasoning in: {logdir}")
         print(f"Log file preserved.")
 
-    ensure_weights(config)
+    # Resolve trajectory generator
+    trajectory_cls = get_trajectory_cls(config)
+
+    # Let the trajectory generator handle its own weight initialization
+    trajectory_cls.ensure_weights(config)
 
     runner_type = config["runner"]
 
     if runner_type == "evolutionary":
-        run_evolutionary(config)
+        run_evolutionary(config, trajectory_cls)
     elif runner_type == "rl":
-        run_rl(config)
+        run_rl(config, trajectory_cls)
     elif runner_type == "props":
-        run_props(config)
+        run_props(config, trajectory_cls)
     else:
         raise ValueError(f"Unknown runner type: {runner_type}")
 
 
-def ensure_weights(config):
-    """
-    Generate initial DMP weights from dataset if they don't already exist.
+# -----------------------------------------------------------------------
+# Runner dispatchers
+# -----------------------------------------------------------------------
 
-    This is PCA+DMP specific. In Phase 2, this will be refactored into
-    the trajectory generators so each method handles its own initialization.
-    """
-    policy_cfg = config["policy"]
-    agent_cfg = config["agent"]
-
-    initial_weights_path = agent_cfg["initial_weights_path"]
-    dmp_params_path = policy_cfg["dmp_params_path"]
-
-    if os.path.exists(initial_weights_path) and os.path.exists(dmp_params_path):
-        print(f"Found existing weights: {initial_weights_path}")
-        print(f"Found existing DMP params: {dmp_params_path}")
-        return
-
-    print("Initial weights not found. Generating from dataset...")
-
-    csv_path = policy_cfg["csv_path"]
-    n_components = policy_cfg["n_components"]
-    n_bfs = policy_cfg["n_bfs"]
-
-    df = pd.read_csv(csv_path)
-    X = df.iloc[:, 1:].values.astype(np.float64)
-    print(f"Dataset: {X.shape[0]} poses, {X.shape[1]} joints")
-
-    pca = PCA(n_components=n_components)
-    X_pca = pca.fit_transform(X)
-    pca_mean = np.mean(X_pca, axis=0)
-    print(f"PCA explained variance: {pca.explained_variance_ratio_}")
-
-    radius = 0.4
-    n_points = 240
-    theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
-    circle_pca = np.column_stack([
-        pca_mean[0] + radius * np.cos(theta),
-        pca_mean[1] + radius * np.sin(theta),
-    ])
-
-    dmp = DMPs_rhythmic(
-        n_dmps=n_components,
-        n_bfs=n_bfs,
-        ay=np.ones(n_components) * 10.0,
-    )
-    dmp.imitate_path(y_des=circle_pca.T)
-    print(f"DMP weights shape: {dmp.w.shape}")
-
-    os.makedirs(os.path.dirname(initial_weights_path), exist_ok=True)
-    np.save(initial_weights_path, dmp.w)
-    print(f"Saved: {initial_weights_path}")
-
-    os.makedirs(os.path.dirname(dmp_params_path), exist_ok=True)
-    np.savez(dmp_params_path, weights=dmp.w, c=dmp.c, h=dmp.h, goal=dmp.goal)
-    print(f"Saved: {dmp_params_path}")
-
-
-def run_evolutionary(config):
+def run_evolutionary(config, trajectory_cls):
     env_cfg = config["env"]
     policy_cfg = config["policy"]
     agent_cfg = config["agent"]
@@ -157,7 +133,7 @@ def run_evolutionary(config):
     evolutionary_runner.run_training_loop(
         env_cls=Go2CrawlEnv,
         env_kwargs=env_cfg,
-        policy_cls=DMPPolicy,
+        policy_cls=trajectory_cls,
         policy_kwargs=policy_cfg,
         agent=agent,
         max_generations=train_cfg["max_generations"],
@@ -173,7 +149,7 @@ def run_evolutionary(config):
     )
 
 
-def run_rl(config):
+def run_rl(config, trajectory_cls):
     env_cfg = config["env"]
     policy_cfg = config["policy"]
     agent_cfg = config["agent"]
@@ -181,7 +157,13 @@ def run_rl(config):
     train_cfg = config["training"]
 
     agent_type = agent_cfg["type"]
-    num_weights = policy_cfg["n_components"] * policy_cfg["n_bfs"]
+
+    # Build a temporary instance to get num_params
+    # (avoids hardcoding n_components * n_bfs or n_joints * n_bfs)
+    temp_policy = trajectory_cls(**policy_cfg)
+    num_weights = temp_policy.num_params
+    del temp_policy
+
     initial_weights = np.load(agent_cfg["initial_weights_path"]).flatten()
 
     if agent_type == "sac_dmp":
@@ -237,7 +219,7 @@ def run_rl(config):
         sac_dmp_runner.run_training_loop(
             env_cls=Go2CrawlEnv,
             env_kwargs=env_cfg,
-            policy_cls=DMPPolicy,
+            policy_cls=trajectory_cls,
             policy_kwargs=policy_cfg,
             agent=agent,
             total_episodes=train_cfg["total_episodes"],
@@ -256,7 +238,7 @@ def run_rl(config):
         ppo_dmp_runner.run_training_loop(
             env_cls=Go2CrawlEnv,
             env_kwargs=env_cfg,
-            policy_cls=DMPPolicy,
+            policy_cls=trajectory_cls,
             policy_kwargs=policy_cfg,
             agent=agent,
             total_episodes=train_cfg["total_episodes"],
@@ -272,7 +254,7 @@ def run_rl(config):
         )
 
 
-def run_props(config):
+def run_props(config, trajectory_cls):
     """Dispatch for ProPS / ProPS+ runner."""
     from agent.props_dmp_agent import ProPSDMPAgent
 
@@ -282,7 +264,11 @@ def run_props(config):
     reward_cfg = config["reward"]
     train_cfg = config["training"]
 
-    num_weights = policy_cfg["n_components"] * policy_cfg["n_bfs"]
+    # Build a temporary instance to get num_params
+    temp_policy = trajectory_cls(**policy_cfg)
+    num_weights = temp_policy.num_params
+    del temp_policy
+
     initial_weights = np.load(agent_cfg["initial_weights_path"]).flatten()
 
     agent = ProPSDMPAgent(
@@ -311,7 +297,7 @@ def run_props(config):
     props_dmp_runner.run_training_loop(
         env_cls=Go2CrawlEnv,
         env_kwargs=env_cfg,
-        policy_cls=DMPPolicy,
+        policy_cls=trajectory_cls,
         policy_kwargs=policy_cfg,
         agent=agent,
         total_iterations=train_cfg["total_iterations"],
