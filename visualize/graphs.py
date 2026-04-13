@@ -1,19 +1,17 @@
 """
-Visualization script for Go2 Crawl training results.
+Training graph generators for Go2 Crawl.
 
-Generates plots from saved checkpoints and logs:
-    1. Reward curve (reward vs generation)
-    2. Distance curve (distance_x vs generation)
-    3. PCA trajectory comparison (initial vs best)
+Generates 5 plot types from saved checkpoints and logs:
+    1. Reward curve (reward vs step)
+    2. Distance curve (distance_x vs step)
+    3. PCA trajectory comparison (initial vs best) — skipped if no PCA
     4. Joint angle trajectories (initial vs best)
     5. Weight evolution across checkpoints
 
-Usage:
-    python visualize.py --config configs/cmaes_bfs10.yaml
+All functions take a save_dir and write PNGs into it.
+PCA-related plots silently skip when the trajectory type has no latent space.
 """
 
-import yaml
-import argparse
 import os
 import glob
 import numpy as np
@@ -21,10 +19,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from policy.dmp_policy import DMPPolicy
+
+JOINT_NAMES = [
+    "FR_hip", "FR_thigh", "FR_calf",
+    "FL_hip", "FL_thigh", "FL_calf",
+    "RR_hip", "RR_thigh", "RR_calf",
+    "RL_hip", "RL_thigh", "RL_calf",
+]
 
 
-def _load_histories(logdir):
+def load_histories(logdir):
     """
     Load reward_history and dist_history from whichever format exists.
 
@@ -43,7 +47,7 @@ def _load_histories(logdir):
         dist_history = hist.get("dist_history", None)
         if reward_history is not None:
             return reward_history, dist_history
-    
+
     # Fall back to checkpoint_latest.npz (evolutionary format)
     latest = os.path.join(checkpoint_dir, "checkpoint_latest.npz")
     if os.path.exists(latest):
@@ -95,16 +99,15 @@ def load_checkpoints(checkpoint_dir):
             "best_weights": bw if bw.size > 0 else None,
         })
 
-    # Sort by step number
     checkpoints.sort(key=lambda c: c["step"])
     return checkpoints
 
 
 def plot_reward_curve(logdir, save_dir):
     """Plot reward vs iteration from history data."""
-    reward_history, _ = _load_histories(logdir)
+    reward_history, _ = load_histories(logdir)
     if reward_history is None:
-        print("No reward history found, skipping reward curve.")
+        print("  No reward history found, skipping reward curve.")
         return
 
     plt.figure(figsize=(10, 5))
@@ -126,14 +129,14 @@ def plot_reward_curve(logdir, save_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "reward_curve.png"), dpi=150)
     plt.close()
-    print("Saved: reward_curve.png")
+    print("  Saved: reward_curve.png")
 
 
 def plot_distance_curve(logdir, save_dir):
     """Plot distance_x vs iteration from history data."""
-    _, dist_history = _load_histories(logdir)
+    _, dist_history = load_histories(logdir)
     if dist_history is None:
-        print("No distance history found, skipping distance curve.")
+        print("  No distance history found, skipping distance curve.")
         return
 
     plt.figure(figsize=(10, 5))
@@ -155,22 +158,36 @@ def plot_distance_curve(logdir, save_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "distance_curve.png"), dpi=150)
     plt.close()
-    print("Saved: distance_curve.png")
+    print("  Saved: distance_curve.png")
 
 
-def plot_pca_comparison(policy_kwargs, initial_weights_path, logdir, save_dir):
-    """Plot initial vs best trajectory in PCA space."""
+def plot_pca_comparison(trajectory_cls, policy_kwargs, initial_weights_path,
+                        logdir, save_dir):
+    """
+    Plot initial vs best trajectory in PCA space.
+    Silently skips if the trajectory type has no PCA support.
+    """
     best_weights_path = os.path.join(logdir, "best_weights.npy")
     if not os.path.exists(best_weights_path):
-        print("No best weights found, skipping PCA comparison.")
+        print("  No best weights found, skipping PCA comparison.")
         return
 
-    policy = DMPPolicy(**policy_kwargs)
+    policy = trajectory_cls(**policy_kwargs)
+
+    # Skip if this trajectory type has no PCA
+    if not hasattr(policy, "X_pca") or not hasattr(policy, "pca"):
+        print("  Trajectory type has no PCA — skipping PCA comparison.")
+        return
+
     initial_weights = np.load(initial_weights_path).flatten()
     best_weights = np.load(best_weights_path).flatten()
 
     latent_initial, _ = policy.generate_latent_trajectory(initial_weights)
     latent_best, _ = policy.generate_latent_trajectory(best_weights)
+
+    if latent_initial is None or latent_best is None:
+        print("  No latent trajectory available — skipping PCA comparison.")
+        return
 
     plt.figure(figsize=(10, 10))
 
@@ -210,35 +227,29 @@ def plot_pca_comparison(policy_kwargs, initial_weights_path, logdir, save_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "pca_comparison.png"), dpi=150)
     plt.close()
-    print("Saved: pca_comparison.png")
+    print("  Saved: pca_comparison.png")
 
 
-def plot_joint_trajectories(policy_kwargs, initial_weights_path, logdir, save_dir):
+def plot_joint_trajectories(trajectory_cls, policy_kwargs, initial_weights_path,
+                            logdir, save_dir):
     """Plot 12 joint angle trajectories for initial vs best."""
     best_weights_path = os.path.join(logdir, "best_weights.npy")
     if not os.path.exists(best_weights_path):
-        print("No best weights found, skipping joint trajectories.")
+        print("  No best weights found, skipping joint trajectories.")
         return
 
-    policy = DMPPolicy(**policy_kwargs)
+    policy = trajectory_cls(**policy_kwargs)
     initial_weights = np.load(initial_weights_path).flatten()
     best_weights = np.load(best_weights_path).flatten()
 
     joint_initial = policy.generate_trajectory(initial_weights)
     joint_best = policy.generate_trajectory(best_weights)
 
-    joint_names = [
-        "FR_hip", "FR_thigh", "FR_calf",
-        "FL_hip", "FL_thigh", "FL_calf",
-        "RR_hip", "RR_thigh", "RR_calf",
-        "RL_hip", "RL_thigh", "RL_calf",
-    ]
-
     fig, axes = plt.subplots(4, 3, figsize=(15, 12))
     for i, ax in enumerate(axes.flat):
         ax.plot(joint_initial[:, i], "g--", alpha=0.5, label="Initial")
         ax.plot(joint_best[:, i], "r-", label="Best")
-        ax.set_title(joint_names[i])
+        ax.set_title(JOINT_NAMES[i])
         ax.set_xlabel("Timestep")
         ax.set_ylabel("Angle (rad)")
         ax.grid(True, alpha=0.3)
@@ -249,19 +260,18 @@ def plot_joint_trajectories(policy_kwargs, initial_weights_path, logdir, save_di
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "joint_trajectories.png"), dpi=150)
     plt.close()
-    print("Saved: joint_trajectories.png")
+    print("  Saved: joint_trajectories.png")
 
 
-def plot_weight_evolution(policy_kwargs, logdir, save_dir):
-    """Plot how DMP weights change across checkpoints."""
+def plot_weight_evolution(logdir, save_dir):
+    """Plot how weights change across checkpoints."""
     checkpoint_dir = os.path.join(logdir, "checkpoints")
     checkpoints = load_checkpoints(checkpoint_dir)
 
-    # Filter out checkpoints with no best_weights
     checkpoints = [c for c in checkpoints if c["best_weights"] is not None]
 
     if len(checkpoints) < 2:
-        print("Not enough checkpoints for weight evolution plot.")
+        print("  Not enough checkpoints for weight evolution plot.")
         return
 
     steps = [c["step"] for c in checkpoints]
@@ -274,49 +284,30 @@ def plot_weight_evolution(policy_kwargs, logdir, save_dir):
 
     plt.xlabel("Step")
     plt.ylabel("Weight Value")
-    plt.title("DMP Weight Evolution Across Checkpoints")
+    plt.title("Weight Evolution Across Checkpoints")
     plt.grid(True, alpha=0.3)
     if n_params <= 20:
         plt.legend(fontsize=7, ncol=4)
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, "weight_evolution.png"), dpi=150)
     plt.close()
-    print("Saved: weight_evolution.png")
+    print("  Saved: weight_evolution.png")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to the config YAML file",
-    )
-    args = parser.parse_args()
-
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
-
-    policy_kwargs = config["policy"]
-    agent_cfg = config["agent"]
-    logdir = config["training"]["logdir"]
-    initial_weights_path = agent_cfg["initial_weights_path"]
-
-    save_dir = os.path.join(logdir, "visualizations")
+def generate_all_graphs(trajectory_cls, policy_kwargs, initial_weights_path,
+                        logdir, save_dir):
+    """Generate all 5 training plots. PCA plots silently skip if not supported."""
     os.makedirs(save_dir, exist_ok=True)
 
-    print(f"Generating visualizations from: {logdir}")
-    print(f"Saving to: {save_dir}")
-    print()
+    print(f"Generating graphs from: {logdir}")
+    print(f"Saving to: {save_dir}\n")
 
     plot_reward_curve(logdir, save_dir)
     plot_distance_curve(logdir, save_dir)
-    plot_pca_comparison(policy_kwargs, initial_weights_path, logdir, save_dir)
-    plot_joint_trajectories(policy_kwargs, initial_weights_path, logdir, save_dir)
-    plot_weight_evolution(policy_kwargs, logdir, save_dir)
+    plot_pca_comparison(trajectory_cls, policy_kwargs, initial_weights_path,
+                        logdir, save_dir)
+    plot_joint_trajectories(trajectory_cls, policy_kwargs, initial_weights_path,
+                            logdir, save_dir)
+    plot_weight_evolution(logdir, save_dir)
 
-    print(f"\nAll visualizations saved to: {save_dir}")
-
-
-if __name__ == "__main__":
-    main()
+    print(f"\nAll graphs saved to: {save_dir}")
