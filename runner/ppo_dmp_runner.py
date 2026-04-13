@@ -1,147 +1,31 @@
 """
 PPO-DMP Runner.
 
-Same role as the SAC-DMP runner but adapted for PPO's on-policy workflow:
+Training loop adapted for PPO's on-policy workflow:
 
     1. Collect n_steps episodes into the rollout buffer
        (each episode: agent provides action + value + log_prob,
-        runner does rollout, stores result)
+        evaluate_single() does rollout, stores result)
     2. Compute GAE advantages and run PPO gradient updates
     3. Discard buffer, repeat
 
-The rollout logic per episode is identical to evolutionary_runner.
-Logging format, checkpointing, and PCA plots match the other runners
-so that visualize.py works without modification.
+Rollout logic, logging, and plotting are imported from evaluation/.
 """
 
 import os
 import time
 import datetime
-import yaml
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
-from env.rewards import get_reward_fn, get_termination_fn
+from evaluation.rollout import evaluate_single, build_eval_args
+from evaluation.logging import write_log_header, save_pca_plot, setup_logdir
 
 
-# ---------------------------------------------------------------------------
-# Rollout (same logic as evolutionary_runner._evaluate_single)
-# ---------------------------------------------------------------------------
+LOG_COLUMNS = (
+    "timestamp,episode,reward,avg_reward_50,overall_best,"
+    "dist_x,avg_dist_x_50,time_sec,update"
+)
 
-def _evaluate_single(args):
-    """
-    Worker function for evaluating one DMP weight vector.
-    Creates its own env and policy per process.
-
-    Returns
-    -------
-    total_reward : float
-    steps : int
-    terminated : bool
-    distance_x : float
-    """
-    (candidate, env_cls, env_kwargs, policy_cls, policy_kwargs,
-     sim_steps, reward_fn_name, termination_fn_name, reward_cfg) = args
-
-    env = env_cls(**env_kwargs)
-    policy = policy_cls(**policy_kwargs)
-    reward_fn = get_reward_fn(reward_fn_name)
-    termination_fn = get_termination_fn(termination_fn_name)
-
-    joint_traj = policy.generate_trajectory(candidate)
-    traj_len = len(joint_traj)
-
-    prev_obs, _ = env.reset()
-    start_x = prev_obs[24]
-    total_reward = 0.0
-    terminated = False
-
-    for t in range(sim_steps):
-        target = joint_traj[t % traj_len]
-        obs, _, _, _, _ = env.step(target)
-
-        reward = reward_fn(prev_obs, obs, reward_cfg)
-        total_reward += reward
-
-        terminated = termination_fn(obs, reward_cfg)
-        if terminated:
-            total_reward -= reward_cfg.get("fall_penalty", 0.0)
-            break
-
-        prev_obs = obs
-
-    distance_x = obs[24] - start_x
-
-    return total_reward, t + 1, terminated, distance_x
-
-
-# ---------------------------------------------------------------------------
-# PCA plot (same as other runners)
-# ---------------------------------------------------------------------------
-
-def _save_pca_plot(policy_cls, policy_kwargs, weights, episode, reward, dist_x, save_path):
-    """Save PCA trajectory plot for current best weights."""
-    policy = policy_cls(**policy_kwargs)
-    latent_traj, _ = policy.generate_latent_trajectory(weights)
-
-    plt.figure(figsize=(8, 8))
-
-    # Dataset poses
-    plt.scatter(
-        policy.X_pca[:, 0], policy.X_pca[:, 1],
-        s=60, c="blue", zorder=5, label="Dataset poses",
-    )
-    for i, lbl in enumerate(policy.labels):
-        plt.text(
-            policy.X_pca[i, 0] + 0.02, policy.X_pca[i, 1] + 0.02,
-            lbl, fontsize=7,
-        )
-
-    # DMP trajectory
-    plt.plot(
-        latent_traj[:, 0], latent_traj[:, 1],
-        "r-", linewidth=2, label="DMP trajectory",
-    )
-    plt.scatter(
-        latent_traj[0, 0], latent_traj[0, 1],
-        s=100, c="orange", zorder=6, label="Start",
-    )
-
-    plt.xlabel(f"PC1 ({100 * policy.pca.explained_variance_ratio_[0]:.1f}%)")
-    plt.ylabel(f"PC2 ({100 * policy.pca.explained_variance_ratio_[1]:.1f}%)")
-    plt.title(f"Ep {episode} | Reward {reward:.1f} | dist_x {dist_x:.4f}")
-    plt.grid(True, alpha=0.3)
-    plt.axis("equal")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=100)
-    plt.close()
-
-
-# ---------------------------------------------------------------------------
-# Log header
-# ---------------------------------------------------------------------------
-
-def _write_log_header(log_path, config):
-    """Write config header and CSV columns to log file."""
-    with open(log_path, "a") as f:
-        f.write("\n")
-        f.write("#" * 60 + "\n")
-        f.write(f"# Run started: {datetime.datetime.now().isoformat()}\n")
-        f.write("#" * 60 + "\n")
-        f.write(yaml.dump(config, default_flow_style=False))
-        f.write("#" * 60 + "\n")
-        f.write(
-            "timestamp,episode,reward,avg_reward_50,overall_best,"
-            "dist_x,avg_dist_x_50,time_sec,update\n"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Training loop
-# ---------------------------------------------------------------------------
 
 def run_training_loop(
     env_cls,
@@ -161,7 +45,7 @@ def run_training_loop(
     full_config=None,
 ):
     """
-    PPO training loop for DMP weight optimization.
+    PPO training loop for weight optimization.
 
     The loop collects n_steps episodes, then runs PPO updates.
     This repeats until total_episodes is reached.
@@ -173,7 +57,7 @@ def run_training_loop(
     env_kwargs : dict
         Constructor kwargs for the env.
     policy_cls : class
-        DMPPolicy class.
+        Trajectory generator / policy class.
     policy_kwargs : dict
         Constructor kwargs for the policy.
     agent : PPODMPAgent
@@ -200,11 +84,7 @@ def run_training_loop(
     full_config : dict or None
         Full config dict for log header.
     """
-    os.makedirs(logdir, exist_ok=True)
-    checkpoint_dir = os.path.join(logdir, "checkpoints")
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    plots_dir = os.path.join(logdir, "plots")
-    os.makedirs(plots_dir, exist_ok=True)
+    checkpoint_dir, plots_dir = setup_logdir(logdir)
 
     # --- Resume from checkpoint ---
     latest_ckpt = os.path.join(checkpoint_dir, "checkpoint_latest")
@@ -226,14 +106,14 @@ def run_training_loop(
 
     # --- Log file ---
     log_path = os.path.join(logdir, "training_log.csv")
-    _write_log_header(log_path, full_config or {})
+    write_log_header(log_path, full_config or {}, LOG_COLUMNS)
     log_file = open(log_path, "a")
 
     n_steps = agent.n_steps
     num_updates = 0
 
     print(
-        f"Starting PPO-DMP training: episodes {start_episode} to {total_episodes}, "
+        f"Starting PPO training: episodes {start_episode} to {total_episodes}, "
         f"n_steps={n_steps} (update every {n_steps} episodes)"
     )
 
@@ -246,27 +126,27 @@ def run_training_loop(
             weights, value, log_prob = agent.get_action_value_logprob(obs)
 
             # 2. Evaluate: policy converts to trajectory, runner steps env
-            eval_args = (
+            eval_args = build_eval_args(
                 weights, env_cls, env_kwargs, policy_cls, policy_kwargs,
                 sim_steps, reward_fn_name, termination_fn_name, reward_cfg,
             )
-            total_reward, steps, terminated, distance_x = _evaluate_single(eval_args)
+            result = evaluate_single(eval_args)
 
             # 3. Add to rollout buffer
             agent.add_to_rollout_buffer(
                 obs=obs,
                 action=weights,
-                reward=total_reward,
+                reward=result.total_reward,
                 done=True,
                 value=value,
                 log_prob=log_prob,
             )
 
             # 4. Track best
-            agent.update_best(weights, total_reward)
+            agent.update_best(weights, result.total_reward)
 
-            reward_history.append(total_reward)
-            dist_history.append(distance_x)
+            reward_history.append(result.total_reward)
+            dist_history.append(result.distance_x)
 
             ep_time = time.time() - ep_start
             now = datetime.datetime.now().isoformat()
@@ -287,17 +167,17 @@ def run_training_loop(
                 update_str = f"update #{num_updates}" if did_update else ""
                 print(
                     f"Ep {ep}: "
-                    f"reward={total_reward:.4f}, "
+                    f"reward={result.total_reward:.4f}, "
                     f"avg_50={avg_reward_50:.4f}, "
                     f"best={best_reward:.4f}, "
-                    f"dist_x={distance_x:.4f}, "
+                    f"dist_x={result.distance_x:.4f}, "
                     f"avg_dist_50={avg_dist_50:.4f}, "
                     f"time={ep_time:.1f}s"
                     f"{' | ' + update_str if update_str else ''}"
                 )
                 log_file.write(
-                    f"{now},{ep},{total_reward:.6f},{avg_reward_50:.6f},"
-                    f"{best_reward:.6f},{distance_x:.6f},"
+                    f"{now},{ep},{result.total_reward:.6f},{avg_reward_50:.6f},"
+                    f"{best_reward:.6f},{result.distance_x:.6f},"
                     f"{avg_dist_50:.6f},{ep_time:.2f},"
                     f"{1 if did_update else 0}\n"
                 )
@@ -305,23 +185,19 @@ def run_training_loop(
 
             # --- Checkpointing ---
             if ep > 0 and ep % checkpoint_every == 0:
-                # Save numbered checkpoint
                 numbered_ckpt = os.path.join(
                     checkpoint_dir, f"checkpoint_ep_{ep:06d}",
                 )
                 agent.save(numbered_ckpt)
 
-                # Save latest checkpoint (for resume)
                 agent.save(latest_ckpt)
 
-                # Save histories
                 np.savez(
                     os.path.join(checkpoint_dir, "histories.npz"),
                     reward_history=np.array(reward_history),
                     dist_history=np.array(dist_history),
                 )
 
-                # Save best weights as .npy (for visualize.py)
                 best_weights, best_reward = agent.get_best()
                 if best_weights is not None:
                     np.save(
@@ -329,13 +205,12 @@ def run_training_loop(
                         best_weights,
                     )
 
-                # PCA trajectory plot
-                _save_pca_plot(
-                    policy_cls, policy_kwargs,
-                    best_weights, ep,
-                    best_reward, distance_x,
-                    os.path.join(plots_dir, f"pca_ep_{ep:06d}.png"),
-                )
+                    save_pca_plot(
+                        policy_cls, policy_kwargs,
+                        best_weights, f"Ep {ep}",
+                        best_reward, result.distance_x,
+                        os.path.join(plots_dir, f"pca_ep_{ep:06d}.png"),
+                    )
 
     except KeyboardInterrupt:
         print("\nTraining interrupted.")
@@ -355,9 +230,9 @@ def run_training_loop(
     if best_w is not None:
         np.save(os.path.join(logdir, "best_weights.npy"), best_w)
 
-        _save_pca_plot(
+        save_pca_plot(
             policy_cls, policy_kwargs,
-            best_w, ep, best_r,
+            best_w, "Final", best_r,
             dist_history[-1] if dist_history else 0.0,
             os.path.join(plots_dir, "pca_final.png"),
         )

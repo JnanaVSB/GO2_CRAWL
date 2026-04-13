@@ -1,7 +1,7 @@
 runner: rl
 
 env:
-  xml_path: /Volumes/DEV/IRL/Go2_crawl/go2/scene.xml
+  xml_path: go2/scene.xml
   control_substeps: 4
   kp: 80.0
   kd: 4.0
@@ -22,7 +22,7 @@ reward:
   fall_penalty: 25.0
 
 policy:
-  csv_path: /Volumes/DEV/IRL/Go2_crawl/dataset/new_dataset_v1.csv
+  csv_path: data/new_dataset_v1.csv
   dmp_params_path: data/weights/dmp_params_newV1_bfs10.npz
   n_components: 2
   n_bfs: 10
