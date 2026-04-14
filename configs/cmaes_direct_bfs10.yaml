@@ -1,0 +1,46 @@
+runner: evolutionary
+
+trajectory:
+  type: direct_dmp
+
+env:
+  xml_path: go2/scene.xml
+  control_substeps: 4
+  kp: 80.0
+  kd: 4.0
+  initial_base_height: 0.30
+  initial_angles: [0.0303, 1.54, -2.3, 0.0303, 1.54, -2.3, 0.0365, 1.48, -2.39, 0.0365, 1.48, -2.39]
+  settle_steps: 1000
+
+reward:
+  reward_fn: forward
+  termination_fn: crawl
+  reward_forward_weight: 1000.0
+  reward_lateral_weight: -500.0
+  reward_joint_vel_weight: -0.0002
+  min_height: 0.14
+  max_height: 0.20
+  max_abs_roll_deg: 50.0
+  max_abs_pitch_deg: 50.0
+  fall_penalty: 25.0
+
+policy:
+  csv_path: data/new_dataset_v1.csv
+  dmp_params_path: data/weights/direct_dmp_params_bfs10.npz
+  n_bfs: 10
+  n_joints: 12
+  dmp_timesteps: 628
+
+agent:
+  type: cmaes
+  initial_weights_path: data/weights/direct_dmp_weights_bfs10.npy
+  sigma0: 0.3
+  popsize: 50
+
+training:
+  max_generations: 800
+  sim_steps: 1000
+  logdir: results/cmaes_direct_bfs10
+  n_workers: 8
+  checkpoint_every: 50
+  log_every: 10
