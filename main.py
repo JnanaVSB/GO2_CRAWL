@@ -163,39 +163,37 @@ def run_rl(config, trajectory_cls):
     train_cfg = config["training"]
 
     agent_type = agent_cfg["type"]
-
-    # Build a temporary instance to get num_params
-    # (avoids hardcoding n_components * n_bfs or n_joints * n_bfs)
-    temp_policy = trajectory_cls(**policy_cfg)
-    num_weights = temp_policy.num_params
-    del temp_policy
-
     initial_weights = np.load(agent_cfg["initial_weights_path"]).flatten()
 
+    # SAC: uses proper SB3 wrapper env, runner handles everything
     if agent_type == "sac_dmp":
-        from agent.sac_dmp_agent import SACDMPAgent
-
-        agent = SACDMPAgent(
-            num_weights=num_weights,
-            initial_weights=initial_weights,
+        sac_dmp_runner.run_training_loop(
+            env_cls=Go2CrawlEnv,
+            env_kwargs=env_cfg,
+            policy_cls=trajectory_cls,
+            policy_kwargs=policy_cfg,
+            agent_cfg=agent_cfg,
             total_episodes=train_cfg["total_episodes"],
-            action_range=agent_cfg.get("action_range", 2.0),
-            learning_rate=agent_cfg.get("learning_rate", 3e-4),
-            batch_size=agent_cfg.get("batch_size", 256),
-            buffer_size=agent_cfg.get("buffer_size", 10_000),
-            learning_starts=agent_cfg.get("learning_starts", 100),
-            tau=agent_cfg.get("tau", 0.005),
-            gamma=agent_cfg.get("gamma", 0.99),
-            ent_coef=agent_cfg.get("ent_coef", "auto"),
-            target_entropy=agent_cfg.get("target_entropy", "auto"),
-            gradient_steps=agent_cfg.get("gradient_steps", 1),
-            net_arch=agent_cfg.get("net_arch", [256, 256]),
-            seed=agent_cfg.get("seed", None),
-            device=agent_cfg.get("device", "auto"),
+            sim_steps=train_cfg["sim_steps"],
+            reward_fn_name=reward_cfg["reward_fn"],
+            termination_fn_name=reward_cfg["termination_fn"],
+            reward_cfg=reward_cfg,
+            logdir=train_cfg["logdir"],
+            n_workers=train_cfg.get("n_workers", 1),
+            checkpoint_every=train_cfg["checkpoint_every"],
+            log_every=train_cfg["log_every"],
+            initial_weights=initial_weights,
+            full_config=config,
         )
+        return
 
-    elif agent_type == "ppo_dmp":
+    # PPO: still uses the manual runner pattern (to be updated later)
+    if agent_type == "ppo_dmp":
         from agent.ppo_dmp_agent import PPODMPAgent
+
+        temp_policy = trajectory_cls(**policy_cfg)
+        num_weights = temp_policy.num_params
+        del temp_policy
 
         agent = PPODMPAgent(
             num_weights=num_weights,
@@ -217,30 +215,6 @@ def run_rl(config, trajectory_cls):
             device=agent_cfg.get("device", "auto"),
         )
 
-    else:
-        raise ValueError(f"Unknown RL agent type: {agent_type}")
-
-    # Dispatch to the appropriate runner
-    if agent_type == "sac_dmp":
-        sac_dmp_runner.run_training_loop(
-            env_cls=Go2CrawlEnv,
-            env_kwargs=env_cfg,
-            policy_cls=trajectory_cls,
-            policy_kwargs=policy_cfg,
-            agent=agent,
-            total_episodes=train_cfg["total_episodes"],
-            sim_steps=train_cfg["sim_steps"],
-            reward_fn_name=reward_cfg["reward_fn"],
-            termination_fn_name=reward_cfg["termination_fn"],
-            reward_cfg=reward_cfg,
-            logdir=train_cfg["logdir"],
-            n_workers=train_cfg.get("n_workers", 1),
-            checkpoint_every=train_cfg["checkpoint_every"],
-            log_every=train_cfg["log_every"],
-            full_config=config,
-        )
-
-    elif agent_type == "ppo_dmp":
         ppo_dmp_runner.run_training_loop(
             env_cls=Go2CrawlEnv,
             env_kwargs=env_cfg,
@@ -258,6 +232,9 @@ def run_rl(config, trajectory_cls):
             log_every=train_cfg["log_every"],
             full_config=config,
         )
+        return
+
+    raise ValueError(f"Unknown RL agent type: {agent_type}")
 
 
 def run_props(config, trajectory_cls):

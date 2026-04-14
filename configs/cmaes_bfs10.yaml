@@ -2,7 +2,7 @@ runner: evolutionary
 seed: null
 
 trajectory:
-  type: pca_dmp # it is taken by default if not mentioned, so no need to have it.
+  type: pca_dmp # it is taken by default if not mentioned, so no need to have it for "PCA" method.
 
 env:
   xml_path: go2/scene.xml

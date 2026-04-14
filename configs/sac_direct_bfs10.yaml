@@ -36,7 +36,8 @@ policy:
 agent:
   type: sac_dmp
   initial_weights_path: data/weights/direct_dmp_weights_bfs10.npy
-  action_range: 2.0
+  action_scale: 1.0
+  # action_range: 5.0
   learning_rate: 3.0e-4
   batch_size: 256
   buffer_size: 10000
