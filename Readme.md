@@ -201,6 +201,6 @@ policy:
 
 ## References
 
-- DMP library adapted from [Travis DeWolf](https://github.com/studywolf/pydmps)
+- DMP library adapted from [pratyush](https://github.com/k-pratyush/humanoid-spider-walk)
 - ProPS: [Zhou et al., NeurIPS 2025](https://github.com/yfzhoucs/props-llm)
 - Unitree Go2 MuJoCo model from [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco)
