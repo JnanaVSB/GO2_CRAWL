@@ -1,5 +1,6 @@
 runner: evolutionary
 
+seed: null
 trajectory:
   type: direct_dmp
 

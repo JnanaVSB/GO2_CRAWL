@@ -18,30 +18,36 @@ class CMAESAgent:
         sigma0,
         popsize,
         max_generations,
+        seed=None,
     ):
         self.initial_weights = np.asarray(initial_weights, dtype=np.float64).flatten()
         self.sigma0 = sigma0
         self.popsize = popsize
         self.max_generations = max_generations
+        self.seed = seed
 
         self.best_reward = -np.inf
         self.best_weights = self.initial_weights.copy()
 
+        opts = {
+            "popsize": self.popsize,
+            "maxiter": self.max_generations,
+            "verb_disp": 0,
+            "verb_log": 0,
+            "tolx": 0,
+            "tolfun": 0,
+            "tolfunhist": 0,
+            "tolstagnation": self.max_generations,
+            "tolupsigma": 1e20,
+            "tolfacupx": 1e20,
+        }
+        if seed is not None:
+            opts["seed"] = seed
+
         self.es = cma.CMAEvolutionStrategy(
             self.initial_weights.tolist(),
             self.sigma0,
-            {
-                "popsize": self.popsize,
-                "maxiter": self.max_generations,
-                "verb_disp": 0,
-                "verb_log": 0,
-                "tolx": 0,
-                "tolfun": 0,
-                "tolfunhist": 0,
-                "tolstagnation": self.max_generations,
-                "tolupsigma": 1e20,
-                "tolfacupx": 1e20,
-            },
+            opts,
         )
 
     def ask(self):
@@ -82,19 +88,24 @@ class CMAESAgent:
         """Resume from checkpoint state."""
         self.best_weights = state["best_weights"].copy()
         self.best_reward = float(state["best_reward"])
+
+        opts = {
+            "popsize": self.popsize,
+            "maxiter": self.max_generations,
+            "verb_disp": 0,
+            "verb_log": 0,
+            "tolx": 0,
+            "tolfun": 0,
+            "tolfunhist": 0,
+            "tolstagnation": self.max_generations,
+            "tolupsigma": 1e20,
+            "tolfacupx": 1e20,
+        }
+        if self.seed is not None:
+            opts["seed"] = self.seed
+
         self.es = cma.CMAEvolutionStrategy(
             state["es_mean"].tolist(),
             state["es_sigma"],
-            {
-                "popsize": self.popsize,
-                "maxiter": self.max_generations,
-                "verb_disp": 0,
-                "verb_log": 0,
-                "tolx": 0,
-                "tolfun": 0,
-                "tolfunhist": 0,
-                "tolstagnation": self.max_generations,
-                "tolupsigma": 1e20,
-                "tolfacupx": 1e20,
-            },
+            opts,
         )

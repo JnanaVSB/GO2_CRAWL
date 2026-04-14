@@ -18,6 +18,7 @@ import os
 import numpy as np
 import shutil
 
+from utils import set_global_seed
 from env.go2_env import Go2CrawlEnv
 from trajectory.pca_dmp import PCADMPTrajectory
 from trajectory.direct_dmp import DirectDMPTrajectory
@@ -80,6 +81,10 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
+    # Set global seed for reproducibility (auto-generates if not in config)
+    seed = set_global_seed(config.get("seed", None))
+    config["seed"] = seed  # store back so it gets logged in training headers
+
     if args.fresh:
         logdir = config["training"]["logdir"]
         for subdir in ["checkpoints", "plots", "reasoning"]:
@@ -128,6 +133,7 @@ def run_evolutionary(config, trajectory_cls):
         sigma0=agent_cfg["sigma0"],
         popsize=agent_cfg["popsize"],
         max_generations=train_cfg["max_generations"],
+        seed=config.get("seed", None),
     )
 
     evolutionary_runner.run_training_loop(

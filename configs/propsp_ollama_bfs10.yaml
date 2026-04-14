@@ -1,5 +1,7 @@
 runner: props
 
+seed: null
+
 env:
   xml_path: go2/scene.xml
   control_substeps: 4

@@ -1,5 +1,7 @@
 runner: rl
 
+seed: null
+
 trajectory:
   type: direct_dmp
 
