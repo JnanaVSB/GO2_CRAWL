@@ -33,7 +33,9 @@ policy:
 agent:
   type: ppo_dmp
   initial_weights_path: data/weights/initial_dmp_weights_newV1_bfs10.npy
-  action_range: 50.0                   # search range: initial_weights ± this value
+  action_scale: 0.5     # replaces action_range
+  reward_scale: 10.0    # amplifies reward for PPO's value function 
+  # action_range: 50.0                   # search range: initial_weights ± this value
   learning_rate: 3.0e-4
   n_steps: 64                         # episodes per PPO update (like CMA-ES popsize)
   batch_size: 64                      # minibatch size for gradient updates (must be <= n_steps)

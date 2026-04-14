@@ -62,6 +62,7 @@ class SACSearchEnv(gym.Env):
         reward_cfg,
         total_episodes,
         action_scale=0.1,
+        reward_scale=10.0,
     ):
         super().__init__()
 
@@ -72,6 +73,7 @@ class SACSearchEnv(gym.Env):
         self.initial_weights = np.asarray(initial_weights, dtype=np.float32).flatten()
         self.num_weights = self.initial_weights.size
         self.action_scale = float(action_scale)
+        self.reward_scale = float(reward_scale)
 
         self.sim_steps = sim_steps
         self.reward_fn_name = reward_fn_name
@@ -206,7 +208,7 @@ class SACSearchEnv(gym.Env):
             "best_weights": self.best_weights.copy(),
         }
 
-        return obs, reward, True, False, info
+        return obs, reward * self.reward_scale, True, False, info
 
 
 # ---------------------------------------------------------------------------

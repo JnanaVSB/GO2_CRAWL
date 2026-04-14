@@ -98,6 +98,10 @@ class SACTrainingCallback(BaseCallback):
         best_reward = info.get("best_reward", -np.inf)
         best_weights = info.get("best_weights", None)
 
+        # Get scaled reward that SB3 actually sees
+        sac_rewards = self.locals.get("rewards", [])
+        scaled_reward = float(sac_rewards[0]) if len(sac_rewards) > 0 else reward
+
         self.reward_history.append(reward)
         self.dist_history.append(distance_x)
 
@@ -113,6 +117,7 @@ class SACTrainingCallback(BaseCallback):
             print(
                 f"Ep {ep}: "
                 f"reward={reward:.4f}, "
+                f"scaled={scaled_reward:.4f}, "
                 f"avg_50={avg_reward_50:.4f}, "
                 f"best={best_reward:.4f}, "
                 f"dist_x={distance_x:.4f}, "
@@ -278,18 +283,23 @@ def run_training_loop(
         reward_cfg=reward_cfg,
         total_episodes=total_episodes,
         action_scale=agent_cfg.get("action_scale", 0.1),
+        reward_scale=agent_cfg.get("reward_scale", 10.0),
     )
 
-    # Validate env before training
+    # Validate env before training (this may call step() internally)
     try:
         check_env(env, warn=True, skip_render_check=True)
     except Exception as e:
         print(f"Warning: check_env raised: {e}")
 
+    # Reset search state after check_env may have polluted it
+    env._reset_search_state()
+
     # Build the SAC model
     model = build_sac_model(env, agent_cfg)
 
     # Resume from checkpoint if exists
+    resumed_episodes = 0
     checkpoint_dir = os.path.join(logdir, "checkpoints")
     latest_ckpt = os.path.join(checkpoint_dir, "checkpoint_latest.zip")
     if os.path.exists(latest_ckpt):
@@ -301,6 +311,7 @@ def run_training_loop(
         if os.path.exists(env_state_path):
             state = np.load(env_state_path, allow_pickle=True)
             env.load_search_state(state)
+            resumed_episodes = env.episodes_done
         else:
             # Fallback: restore from histories only (old checkpoints)
             hist_path = os.path.join(checkpoint_dir, "histories.npz")
@@ -308,10 +319,11 @@ def run_training_loop(
                 hist = np.load(hist_path, allow_pickle=True)
                 env.reward_history = hist["reward_history"].tolist()
                 env.episodes_done = len(env.reward_history)
+                resumed_episodes = env.episodes_done
 
-        print(f"Resumed from episode {env.episodes_done}")
+        print(f"Resumed from episode {resumed_episodes}")
 
-    remaining = total_episodes - env.episodes_done
+    remaining = total_episodes - resumed_episodes
     if remaining <= 0:
         print("Training already complete.")
         return
