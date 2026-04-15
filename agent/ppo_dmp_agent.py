@@ -54,6 +54,7 @@ class PPOSearchEnv(gym.Env):
         total_episodes,
         action_scale=0.1,
         reward_scale=10.0,
+        obs_traj_steps=32,
     ):
         super().__init__()
 
@@ -65,12 +66,26 @@ class PPOSearchEnv(gym.Env):
         self.num_weights = self.initial_weights.size
         self.action_scale = float(action_scale)
         self.reward_scale = float(reward_scale)
+        self.obs_traj_steps = obs_traj_steps
 
         self.sim_steps = sim_steps
         self.reward_fn_name = reward_fn_name
         self.termination_fn_name = termination_fn_name
         self.reward_cfg = reward_cfg
         self.total_episodes = total_episodes
+
+        # Trajectory generator for building observations
+        self.traj_gen = policy_cls(**policy_kwargs)
+
+        # Compute initial trajectory for the first observation
+        full_traj = self.traj_gen.generate_trajectory(self.initial_weights)
+        self.n_joints = full_traj.shape[1]
+        self.full_traj_len = full_traj.shape[0]
+
+        # Downsample indices
+        self.ds_indices = np.linspace(
+            0, self.full_traj_len - 1, self.obs_traj_steps, dtype=int
+        )
 
         # Normalized action space: [-1, 1] for all dimensions
         self.action_space = spaces.Box(
@@ -79,8 +94,9 @@ class PPOSearchEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Observation: norm_delta_best + norm_delta_last + reward stats + progress
-        self.obs_dim = 2 * self.num_weights + 4
+        # Observation: last_trajectory + best_trajectory + reward stats
+        traj_flat_dim = self.obs_traj_steps * self.n_joints
+        self.obs_dim = traj_flat_dim * 2 + 4
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32,
         )
@@ -97,17 +113,27 @@ class PPOSearchEnv(gym.Env):
         self.reward_history = []
         self.episodes_done = 0
 
+        init_traj = self.traj_gen.generate_trajectory(self.initial_weights)
+        self.best_traj_ds = init_traj[self.ds_indices].astype(np.float32)
+        self.last_traj_ds = init_traj[self.ds_indices].astype(np.float32)
+
     def _action_to_weights(self, action):
         """Map normalized action [-1,1] to actual DMP weights."""
         action = np.clip(action, -1.0, 1.0)
         return self.initial_weights + action * self.action_scale
 
-    def _build_obs(self):
-        """Build observation with normalized deltas and raw reward stats."""
-        scale = self.action_scale if self.action_scale > 1e-10 else 1.0
-        norm_delta_best = (self.best_weights - self.initial_weights) / scale
-        norm_delta_last = (self.last_weights - self.initial_weights) / scale
+    def _weights_to_traj_ds(self, weights):
+        """Generate trajectory from weights and downsample."""
+        full_traj = self.traj_gen.generate_trajectory(weights)
+        return full_traj[self.ds_indices].astype(np.float32)
 
+    def _build_obs(self):
+        """
+        Build observation from trajectory shapes.
+
+        The critic sees actual joint angle trajectories rather than
+        abstract weight vectors.
+        """
         if len(self.reward_history) > 0:
             best_r = self.best_reward
             mean_r = np.mean(self.reward_history[-50:])
@@ -118,8 +144,8 @@ class PPOSearchEnv(gym.Env):
         progress = self.episodes_done / max(self.total_episodes, 1)
 
         obs = np.concatenate([
-            norm_delta_best,
-            norm_delta_last,
+            self.last_traj_ds.flatten(),
+            self.best_traj_ds.flatten(),
             np.array([best_r, mean_r, self.last_reward, progress]),
         ]).astype(np.float32)
 
@@ -145,6 +171,9 @@ class PPOSearchEnv(gym.Env):
         self.reward_history = state["reward_history"].tolist()
         self.episodes_done = int(state["episodes_done"])
 
+        self.best_traj_ds = self._weights_to_traj_ds(self.best_weights)
+        self.last_traj_ds = self._weights_to_traj_ds(self.last_weights)
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         return self._build_obs(), {}
@@ -168,14 +197,16 @@ class PPOSearchEnv(gym.Env):
 
         reward = float(result.total_reward)
 
-        # Update search state (raw reward)
+        # Update search state + trajectories
         self.last_weights = weights.copy()
         self.last_reward = reward
+        self.last_traj_ds = self._weights_to_traj_ds(weights)
         self.reward_history.append(reward)
 
         if reward > self.best_reward:
             self.best_reward = reward
             self.best_weights = weights.copy()
+            self.best_traj_ds = self.last_traj_ds.copy()
 
         self.episodes_done += 1
 

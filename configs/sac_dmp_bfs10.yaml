@@ -33,24 +33,24 @@ policy:
 agent:
   type: sac_dmp
   initial_weights_path: data/weights/initial_dmp_weights_newV1_bfs10.npy
-  action_scale: 1.0
-  reward_scale: 20.0
+  action_scale: 10.0
+  reward_scale: 1.0
    # action_range: 2.0                   # search range: initial_weights ± this value
   learning_rate: 3.0e-4
-  batch_size: 128
-  buffer_size: 10000
+  batch_size: 64
+  buffer_size: 5000
   learning_starts: 20
   tau: 0.005
   gamma: 0.99
   ent_coef: auto
-  target_entropy: auto
+  target_entropy: -4   # change to auto.
   gradient_steps: 4
   net_arch: [256, 256]
   seed: null
   device: auto
 
 training:
-  total_episodes: 5000
+  total_episodes: 7000
   sim_steps: 1000
   logdir: results/sac_dmp_bfs10
   n_workers: 1
