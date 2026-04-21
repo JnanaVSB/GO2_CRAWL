@@ -26,7 +26,7 @@ reward:
   fall_penalty: 25.0
 
 policy:
-  csv_path: data/new_dataset_v1.csv
+  csv_path: data/new_dataset_v2_fullgait.csv
   dmp_params_path: data/weights/dmp_params_newV1_bfs10.npz
   n_components: 2
   n_bfs: 10
@@ -41,7 +41,7 @@ agent:
 training:
   max_generations: 800
   sim_steps: 1000
-  logdir: results/cmaes_bfs10
+  logdir: results/cmaes_bfs10_fullgait  
   n_workers: 8
   checkpoint_every: 50
   log_every: 10

@@ -39,10 +39,12 @@ KP = 320.0
 KD = 8.0
 
 target_qpos = np.array([
-    0.0303, 1.34, -2.15,
-    0.0303, 1.34, -2.15,
-    0.0365, 1.38, -2.17,
-    0.0365, 1.38, -2.17,
+
+    # 0.0171,0.9853,-1.9689,0.0449,0.9853,-1.9689,0.0276,0.9443,-1.9972,0.0443,0.9443,-1.9783
+    # 0.0303, 1.34, -2.15,
+    # 0.0303, 1.34, -2.15,
+    # 0.0365, 1.38, -2.17,
+    # 0.0365, 1.38, -2.17,
 ])
 
 # target_qpos = np.array([
@@ -74,7 +76,7 @@ def settle_robot(target, steps=10000):
 mujoco.mj_forward(model, data)
 settle_robot(target_qpos)
 
-csv_file = "dataset/new_dataset_v1.csv"
+csv_file = "data/new_dataset_v2_fullgait.csv"
 pose_count = 0
 
 print("=" * 60)
