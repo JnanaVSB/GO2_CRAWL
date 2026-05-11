@@ -26,22 +26,26 @@ reward:
   fall_penalty: 25.0
 
 policy:
-  csv_path: data/new_dataset_v2_fullgait.csv
-  dmp_params_path: data/weights/dmp_params_newV1_bfs10.npz
+  csv_path: data/data_12_points.csv
+  dmp_params_path: data/weights/planner_12_points_dmp_weights.npz
   n_components: 2
   n_bfs: 10
   dmp_timesteps: 628
+  policy:
+  init_shape: ellipse    # "circle" or "ellipse"
+  pca1: null             # ellipse semi-axis along PC1 (null -> 0.4); ignored for circle
+  pca2: null             # ellipse semi-axis along PC2 (null -> 0.1); ignored for circle
 
 agent:
   type: cmaes
-  initial_weights_path: data/weights/initial_dmp_weights_newV1_bfs10.npy
+  initial_weights_path: data/weights/planner_12_points_weights.npy
   sigma0: 0.3
   popsize: 50
 
 training:
   max_generations: 800
   sim_steps: 1000
-  logdir: results/cmaes_bfs10_fullgait  
+  logdir: results/cmaes_bfs10_12_point  
   n_workers: 8
   checkpoint_every: 50
   log_every: 10

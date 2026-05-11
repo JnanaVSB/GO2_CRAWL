@@ -7,7 +7,14 @@ Converts a flat weight vector into a joint angle trajectory using:
     3. PCA inverse transform to 12-dim joint space
 
 This is the original trajectory method used in the Go2 crawl project.
-Weight initialization creates a circular trajectory in PCA space.
+Weight initialization creates a circular or elliptical trajectory in
+PCA space, centered at the dataset mean. The start point of the
+trajectory (DMP at t=0) is the point on the shape nearest to X_pca[0]
+(first dataset pose projected into latent space).
+
+The joint-space inverse of that start point is saved as `start_joints`
+in the DMP params file so the env can be reset to the exact config
+the DMP commands at t=0.
 """
 
 import os
@@ -126,8 +133,11 @@ class PCADMPTrajectory(TrajectoryGenerator):
         """
         Generate initial PCA+DMP weights if they don't exist.
 
-        Creates a circular trajectory in PCA space and trains a
-        rhythmic DMP to imitate it.
+        Builds a circle or ellipse in PCA space (per policy.init_shape),
+        centered at the dataset mean, with its start point chosen as
+        the point on the shape nearest to X_pca[0]. Trains a rhythmic
+        DMP to imitate it. Also saves the joint-space inverse of the
+        start point as `start_joints`.
         """
         policy_cfg = config["policy"]
         agent_cfg = config["agent"]
@@ -155,13 +165,46 @@ class PCADMPTrajectory(TrajectoryGenerator):
         pca_mean = np.mean(X_pca, axis=0)
         print(f"PCA explained variance: {pca.explained_variance_ratio_}")
 
-        radius = 0.4
+        init_shape = policy_cfg.get("init_shape", "circle")
+        target_latent = X_pca[0]
         n_points = 240
-        theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False)
-        circle_pca = np.column_stack([
-            pca_mean[0] + radius * np.cos(theta),
-            pca_mean[1] + radius * np.sin(theta),
-        ])
+
+        if init_shape == "circle":
+            radius = float(np.linalg.norm(X_pca[0] - pca_mean))
+            v = target_latent - pca_mean
+            phi0 = float(np.arctan2(v[1], v[0]))
+            theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False) + phi0
+            circle_pca = np.column_stack([
+                pca_mean[0] + radius * np.cos(theta),
+                pca_mean[1] + radius * np.sin(theta),
+            ])
+            print(f"Init shape: circle, radius={radius:.4f}, "
+                  f"start_angle={np.degrees(phi0):.2f} deg")
+
+        elif init_shape == "ellipse":
+            a = policy_cfg.get("pca1") if policy_cfg.get("pca1") is not None else 0.4
+            b = policy_cfg.get("pca2") if policy_cfg.get("pca2") is not None else 0.1
+            theta_dense = np.linspace(0, 2 * np.pi, 4000, endpoint=False)
+            pts = np.column_stack([
+                pca_mean[0] + a * np.cos(theta_dense),
+                pca_mean[1] + b * np.sin(theta_dense),
+            ])
+            phi0 = float(theta_dense[np.argmin(np.linalg.norm(pts - target_latent, axis=1))])
+            theta = np.linspace(0, 2 * np.pi, n_points, endpoint=False) + phi0
+            circle_pca = np.column_stack([
+                pca_mean[0] + a * np.cos(theta),
+                pca_mean[1] + b * np.sin(theta),
+            ])
+            print(f"Init shape: ellipse, a={a}, b={b}, "
+                  f"start_angle={np.degrees(phi0):.2f} deg")
+
+        else:
+            raise ValueError(
+                f"Unknown init_shape: {init_shape!r}. Use 'circle' or 'ellipse'."
+            )
+
+        start_joints = pca.inverse_transform(circle_pca[0].reshape(1, -1))[0]
+        print(f"start_joints (env base pose): {start_joints}")
 
         dmp = DMPs_rhythmic(
             n_dmps=n_components,
@@ -176,5 +219,12 @@ class PCADMPTrajectory(TrajectoryGenerator):
         print(f"Saved: {initial_weights_path}")
 
         os.makedirs(os.path.dirname(dmp_params_path), exist_ok=True)
-        np.savez(dmp_params_path, weights=dmp.w, c=dmp.c, h=dmp.h, goal=dmp.goal)
+        np.savez(
+            dmp_params_path,
+            weights=dmp.w,
+            c=dmp.c,
+            h=dmp.h,
+            goal=dmp.goal,
+            start_joints=start_joints,
+        )
         print(f"Saved: {dmp_params_path}")

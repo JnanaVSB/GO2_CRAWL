@@ -31,6 +31,10 @@ policy:
   n_components: 2
   n_bfs: 10
   dmp_timesteps: 628
+  policy:
+  init_shape: ellipse    # "circle" or "ellipse"
+  pca1: null             # ellipse semi-axis along PC1 (null -> 0.4); ignored for circle
+  pca2: null             # ellipse semi-axis along PC2 (null -> 0.1); ignored for circle
 
 agent:
   type: props_dmp
@@ -67,3 +71,4 @@ training:
   n_workers: 1
   checkpoint_every: 10
   log_every: 1
+  save_every_iter: true

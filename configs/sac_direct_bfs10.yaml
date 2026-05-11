@@ -52,7 +52,7 @@ agent:
   device: auto
 
 training:
-  total_episodes: 5000
+  total_episodes: 2000000
   sim_steps: 1000
   logdir: results/sac_direct_bfs10
   n_workers: 1

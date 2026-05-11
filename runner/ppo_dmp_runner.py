@@ -1,339 +1,192 @@
 """
-PPO-DMP Runner.
+Evolutionary Runner (CMA-ES).
 
-Uses SB3's model.learn() with a proper Gymnasium wrapper env.
-SB3 owns the training loop — action sampling, rollout buffer,
-GAE computation, clipping updates are all handled internally.
+Training loop for evolutionary DMP weight optimization:
 
-Same architecture as SAC runner:
-    1. Create the PPOSearchEnv wrapper
-    2. Validate with check_env
-    3. Build the PPO model
-    4. Set up callbacks for logging, checkpointing, best weights
-    5. Call model.learn()
-    6. Save final results
+    1. Agent asks for candidate weight vectors
+    2. evaluate_single() converts each to a trajectory and steps the env
+    3. Agent receives rewards and updates
+
+Rollout logic, logging, and plotting are imported from evaluation/.
+
+At end of training, a single reward_curve.png is written with the best
+generation starred. Per-iteration recording is intentionally not wired
+in here — CMA-ES evaluates 50 individuals per generation, so per-call
+recording would be infeasible.
 """
 
 import os
 import time
 import datetime
 import numpy as np
+import multiprocessing as mp
 
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.env_checker import check_env
-
-from agent.ppo_dmp_agent import PPOSearchEnv, build_ppo_model
+from evaluation.rollout import evaluate_single, build_eval_args
 from evaluation.logging import write_log_header, save_pca_plot, setup_logdir
+from evaluation.per_iteration_save import save_reward_curve
 
 
 LOG_COLUMNS = (
-    "timestamp,episode,reward,scaled,avg_reward_50,overall_best,"
-    "dist_x,avg_dist_x_50,time_sec"
+    "timestamp,gen,best_reward,avg_reward,overall_best,"
+    "best_dist_x,avg_dist_x,time_sec"
 )
 
-
-# ---------------------------------------------------------------------------
-# Callback for logging, checkpointing, and best weights tracking
-# ---------------------------------------------------------------------------
-
-class PPOTrainingCallback(BaseCallback):
-    """
-    Custom callback for PPO training — handles logging, checkpointing,
-    best weights tracking, and PCA plot generation.
-    """
-
-    def __init__(
-        self,
-        logdir,
-        checkpoint_every,
-        log_every,
-        policy_cls,
-        policy_kwargs,
-        full_config,
-        verbose=0,
-    ):
-        super().__init__(verbose)
-        self.logdir = logdir
-        self.checkpoint_every = checkpoint_every
-        self.log_every = log_every
-        self.policy_cls = policy_cls
-        self.policy_kwargs = policy_kwargs
-        self.full_config = full_config
-
-        self.checkpoint_dir, self.plots_dir = setup_logdir(logdir)
-
-        # Log file
-        self.log_path = os.path.join(logdir, "training_log.csv")
-        write_log_header(self.log_path, full_config or {}, LOG_COLUMNS)
-        self.log_file = None
-
-        # Tracking
-        self.reward_history = []
-        self.dist_history = []
-        self.ep_start_time = None
-        self.ep_count = 0
-
-    def _get_env(self):
-        """Access the underlying PPOSearchEnv through SB3's wrapper."""
-        return self.training_env.envs[0].unwrapped
-
-    def _on_training_start(self):
-        self.log_file = open(self.log_path, "a")
-        self.ep_start_time = time.time()
-
-    def _on_step(self) -> bool:
-        infos = self.locals.get("infos", [])
-        if not infos:
-            return True
-
-        info = infos[0]
-        self.ep_count += 1
-        ep = self.ep_count
-        reward = info.get("total_reward", 0.0)
-        distance_x = info.get("distance_x", 0.0)
-        best_reward = info.get("best_reward", -np.inf)
-        best_weights = info.get("best_weights", None)
-
-        # Get scaled reward that SB3 sees
-        sac_rewards = self.locals.get("rewards", [])
-        scaled_reward = float(sac_rewards[0]) if len(sac_rewards) > 0 else reward
-
-        self.reward_history.append(reward)
-        self.dist_history.append(distance_x)
-
-        ep_time = time.time() - self.ep_start_time
-        self.ep_start_time = time.time()
-        now = datetime.datetime.now().isoformat()
-
-        # --- Logging ---
-        if ep % self.log_every == 0:
-            avg_reward_50 = np.mean(self.reward_history[-50:])
-            avg_dist_50 = np.mean(self.dist_history[-50:])
-
-            print(
-                f"Ep {ep}: "
-                f"reward={reward:.4f}, "
-                f"scaled={scaled_reward:.4f}, "
-                f"avg_50={avg_reward_50:.4f}, "
-                f"best={best_reward:.4f}, "
-                f"dist_x={distance_x:.4f}, "
-                f"avg_dist_50={avg_dist_50:.4f}, "
-                f"time={ep_time:.1f}s"
-            )
-            self.log_file.write(
-                f"{now},{ep},{reward:.6f},{scaled_reward:.6f},"
-                f"{avg_reward_50:.6f},{best_reward:.6f},"
-                f"{distance_x:.6f},{avg_dist_50:.6f},{ep_time:.2f}\n"
-            )
-            self.log_file.flush()
-
-        # --- Checkpointing ---
-        if ep > 0 and ep % self.checkpoint_every == 0:
-            self.model.save(
-                os.path.join(self.checkpoint_dir, f"checkpoint_ep_{ep:06d}")
-            )
-            self.model.save(
-                os.path.join(self.checkpoint_dir, "checkpoint_latest")
-            )
-
-            # Save full env search state + histories
-            env = self._get_env()
-            search_state = env.get_search_state()
-            np.savez(
-                os.path.join(self.checkpoint_dir, "env_state.npz"),
-                **search_state,
-            )
-            np.savez(
-                os.path.join(self.checkpoint_dir, "histories.npz"),
-                reward_history=np.array(self.reward_history),
-                dist_history=np.array(self.dist_history),
-            )
-
-            if best_weights is not None:
-                np.save(
-                    os.path.join(self.logdir, "best_weights.npy"),
-                    best_weights,
-                )
-
-                save_pca_plot(
-                    self.policy_cls, self.policy_kwargs,
-                    best_weights, f"Ep {ep}",
-                    best_reward, distance_x,
-                    os.path.join(self.plots_dir, f"pca_ep_{ep:06d}.png"),
-                )
-
-        return True
-
-    def _on_training_end(self):
-        if self.log_file:
-            self.log_file.close()
-
-        env = self._get_env()
-        best_weights = env.best_weights
-        best_reward = env.best_reward
-
-        search_state = env.get_search_state()
-        np.savez(
-            os.path.join(self.checkpoint_dir, "env_state.npz"),
-            **search_state,
-        )
-        np.savez(
-            os.path.join(self.checkpoint_dir, "histories.npz"),
-            reward_history=np.array(self.reward_history),
-            dist_history=np.array(self.dist_history),
-        )
-
-        if best_weights is not None:
-            np.save(
-                os.path.join(self.logdir, "best_weights.npy"),
-                best_weights,
-            )
-            save_pca_plot(
-                self.policy_cls, self.policy_kwargs,
-                best_weights, "Final",
-                best_reward,
-                self.dist_history[-1] if self.dist_history else 0.0,
-                os.path.join(self.plots_dir, "pca_final.png"),
-            )
-
-        self.model.save(
-            os.path.join(self.checkpoint_dir, "checkpoint_latest")
-        )
-
-        print(f"Training complete. Best reward: {best_reward:.4f}")
-
-
-# ---------------------------------------------------------------------------
-# Training loop
-# ---------------------------------------------------------------------------
 
 def run_training_loop(
     env_cls,
     env_kwargs,
     policy_cls,
     policy_kwargs,
-    agent_cfg,
-    total_episodes,
+    agent,
+    max_generations,
     sim_steps,
     reward_fn_name,
     termination_fn_name,
     reward_cfg,
     logdir,
+    n_workers,
     checkpoint_every,
     log_every,
-    initial_weights,
     full_config=None,
-    **kwargs,
 ):
-    """
-    PPO training loop using SB3's model.learn().
+    checkpoint_dir, plots_dir = setup_logdir(logdir)
 
-    Parameters
-    ----------
-    env_cls : class
-        Go2CrawlEnv class.
-    env_kwargs : dict
-        Constructor kwargs for the MuJoCo env.
-    policy_cls : class
-        Trajectory generator class.
-    policy_kwargs : dict
-        Constructor kwargs for the trajectory generator.
-    agent_cfg : dict
-        Agent config section (PPO hyperparameters).
-    total_episodes : int
-        Total number of episodes.
-    sim_steps : int
-        Simulation steps per rollout.
-    reward_fn_name : str
-        Name of reward function.
-    termination_fn_name : str
-        Name of termination function.
-    reward_cfg : dict
-        Reward/termination config.
-    logdir : str
-        Directory for logs, checkpoints, plots.
-    checkpoint_every : int
-        Save checkpoint every N episodes.
-    log_every : int
-        Print and log every N episodes.
-    initial_weights : np.ndarray
-        Initial DMP weights (the safe prior).
-    full_config : dict or None
-        Full config dict for log header.
-    **kwargs
-        Absorbs extra args (e.g. n_workers) without error.
-    """
-    # Create the wrapper env
-    env = PPOSearchEnv(
-        env_cls=env_cls,
-        env_kwargs=env_kwargs,
-        policy_cls=policy_cls,
-        policy_kwargs=policy_kwargs,
-        initial_weights=initial_weights,
-        sim_steps=sim_steps,
-        reward_fn_name=reward_fn_name,
-        termination_fn_name=termination_fn_name,
-        reward_cfg=reward_cfg,
-        total_episodes=total_episodes,
-        action_scale=agent_cfg.get("action_scale", 0.1),
-        reward_scale=agent_cfg.get("reward_scale", 10.0),
-    )
+    # Check for existing checkpoint
+    latest_ckpt = os.path.join(checkpoint_dir, "checkpoint_latest.npz")
+    start_gen = 0
+    reward_history = []
+    dist_history = []
 
-    # Validate env before training
-    try:
-        check_env(env, warn=True, skip_render_check=True)
-    except Exception as e:
-        print(f"Warning: check_env raised: {e}")
-
-    # Reset after check_env may have polluted state
-    env._reset_search_state()
-
-    # Build the PPO model
-    model = build_ppo_model(env, agent_cfg)
-
-    # Resume from checkpoint if exists
-    resumed_episodes = 0
-    checkpoint_dir = os.path.join(logdir, "checkpoints")
-    latest_ckpt = os.path.join(checkpoint_dir, "checkpoint_latest.zip")
     if os.path.exists(latest_ckpt):
-        ckpt_path = os.path.join(checkpoint_dir, "checkpoint_latest")
-        model = model.load(ckpt_path, env=env)
+        ckpt = np.load(latest_ckpt, allow_pickle=True)
+        start_gen = int(ckpt["gen"]) + 1
+        reward_history = ckpt["reward_history"].tolist()
+        if "dist_history" in ckpt:
+            dist_history = ckpt["dist_history"].tolist()
+        agent.load_state({
+            "es_mean": ckpt["es_mean"],
+            "es_sigma": float(ckpt["es_sigma"]),
+            "best_weights": ckpt["best_weights"],
+            "best_reward": float(ckpt["best_reward"]),
+        })
+        print(f"Resumed from generation {start_gen}")
 
-        env_state_path = os.path.join(checkpoint_dir, "env_state.npz")
-        if os.path.exists(env_state_path):
-            state = np.load(env_state_path, allow_pickle=True)
-            env.load_search_state(state)
-            resumed_episodes = env.episodes_done
-        else:
-            hist_path = os.path.join(checkpoint_dir, "histories.npz")
-            if os.path.exists(hist_path):
-                hist = np.load(hist_path, allow_pickle=True)
-                env.reward_history = hist["reward_history"].tolist()
-                env.episodes_done = len(env.reward_history)
-                resumed_episodes = env.episodes_done
+    # Log file
+    log_path = os.path.join(logdir, "training_log.csv")
+    write_log_header(log_path, full_config or {}, LOG_COLUMNS)
+    log_file = open(log_path, "a")
 
-        print(f"Resumed from episode {resumed_episodes}")
+    print(f"Starting training: generations {start_gen} to {max_generations}")
 
-    remaining = total_episodes - resumed_episodes
-    if remaining <= 0:
-        print("Training already complete.")
-        return
+    try:
+        for gen in range(start_gen, max_generations):
+            gen_start = time.time()
 
-    # Set up callback
-    callback = PPOTrainingCallback(
-        logdir=logdir,
-        checkpoint_every=checkpoint_every,
-        log_every=log_every,
-        policy_cls=policy_cls,
-        policy_kwargs=policy_kwargs,
-        full_config=full_config,
+            candidates = agent.ask()
+
+            eval_args = [
+                build_eval_args(
+                    c, env_cls, env_kwargs, policy_cls, policy_kwargs,
+                    sim_steps, reward_fn_name, termination_fn_name, reward_cfg,
+                )
+                for c in candidates
+            ]
+
+            if n_workers > 1:
+                with mp.Pool(processes=n_workers) as pool:
+                    results = pool.map(evaluate_single, eval_args)
+            else:
+                results = [evaluate_single(a) for a in eval_args]
+
+            rewards = [r.total_reward for r in results]
+            distances = [r.distance_x for r in results]
+
+            agent.tell(candidates, rewards)
+
+            gen_best_idx = np.argmax(rewards)
+            gen_best = rewards[gen_best_idx]
+            gen_avg = np.mean(rewards)
+            best_dist_x = distances[gen_best_idx]
+            avg_dist_x = np.mean(distances)
+            overall_best_weights, overall_best_reward = agent.get_best()
+            gen_time = time.time() - gen_start
+            now = datetime.datetime.now().isoformat()
+
+            reward_history.append(gen_best)
+            dist_history.append(best_dist_x)
+
+            if gen % log_every == 0:
+                print(
+                    f"Gen {gen}: best={gen_best:.4f}, "
+                    f"avg={gen_avg:.4f}, "
+                    f"overall_best={overall_best_reward:.4f}, "
+                    f"dist_x={best_dist_x:.4f}, "
+                    f"avg_dist_x={avg_dist_x:.4f}, "
+                    f"time={gen_time:.1f}s"
+                )
+                log_file.write(
+                    f"{now},{gen},{gen_best:.6f},{gen_avg:.6f},"
+                    f"{overall_best_reward:.6f},{best_dist_x:.6f},"
+                    f"{avg_dist_x:.6f},{gen_time:.2f}\n"
+                )
+                log_file.flush()
+
+            if gen > 0 and gen % checkpoint_every == 0:
+                state = agent.get_state()
+                np.savez(
+                    os.path.join(checkpoint_dir, f"checkpoint_gen_{gen:04d}.npz"),
+                    gen=gen,
+                    reward_history=np.array(reward_history),
+                    dist_history=np.array(dist_history),
+                    **state,
+                )
+                np.savez(
+                    latest_ckpt,
+                    gen=gen,
+                    reward_history=np.array(reward_history),
+                    dist_history=np.array(dist_history),
+                    **state,
+                )
+                np.save(
+                    os.path.join(logdir, "best_weights.npy"),
+                    overall_best_weights,
+                )
+
+                save_pca_plot(
+                    policy_cls, policy_kwargs,
+                    overall_best_weights, f"Gen {gen}",
+                    overall_best_reward, best_dist_x,
+                    os.path.join(plots_dir, f"pca_gen_{gen:04d}.png"),
+                )
+
+    except KeyboardInterrupt:
+        print("\nTraining interrupted.")
+
+    log_file.close()
+
+    state = agent.get_state()
+    np.savez(
+        latest_ckpt,
+        gen=gen,
+        reward_history=np.array(reward_history),
+        dist_history=np.array(dist_history),
+        **state,
+    )
+    best_w, best_r = agent.get_best()
+    np.save(os.path.join(logdir, "best_weights.npy"), best_w)
+
+    save_pca_plot(
+        policy_cls, policy_kwargs,
+        best_w, "Final", best_r,
+        dist_history[-1] if dist_history else 0.0,
+        os.path.join(plots_dir, "pca_final.png"),
     )
 
-    print(f"Starting PPO training: {remaining} episodes remaining")
-
-    # Let SB3 handle everything
-    model.learn(
-        total_timesteps=remaining,
-        callback=callback,
-        reset_num_timesteps=False,
+    # --- Post-training reward curve ---
+    save_reward_curve(
+        log_path=log_path,
+        out_path=os.path.join(logdir, "reward_curve.png"),
+        runner_type="evolutionary",
     )
+
+    print(f"Training complete. Best reward: {best_r:.4f}")

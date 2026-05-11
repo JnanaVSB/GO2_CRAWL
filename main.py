@@ -103,6 +103,19 @@ def main():
     # Let the trajectory generator handle its own weight initialization
     trajectory_cls.ensure_weights(config)
 
+    # Override env base pose with the DMP's start joint angles, so the env
+    # resets to the exact joint config the DMP commands at t=0.
+    dmp_params_path = config["policy"]["dmp_params_path"]
+    dmp_params = np.load(dmp_params_path)
+    if "start_joints" in dmp_params.files:
+        start_joints = dmp_params["start_joints"]
+        config["env"]["initial_angles"] = start_joints.tolist()
+        print(f"Env base pose overridden from {dmp_params_path}:")
+        print(f"  initial_angles = {start_joints.tolist()}")
+    else:
+        print(f"WARNING: {dmp_params_path} has no 'start_joints'. "
+            f"Env will use initial_angles from the yaml.")
+
     runner_type = config["runner"]
 
     if runner_type == "evolutionary":
